@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "noEmit": true,
+    // Vite resolves the extensions; nothing is emitted, so explicit .ts imports are safe.
+    "allowImportingTsExtensions": true,
+    "jsx": "preserve"
+  },
+  "include": ["src", "vite.config.ts"]
+}

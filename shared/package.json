@@ -1,0 +1,6 @@
+{
+  "name": "@bitlegion/shared",
+  "private": true,
+  "type": "module",
+  "main": "contracts/index.ts"
+}
