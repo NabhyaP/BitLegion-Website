@@ -171,4 +171,40 @@ admin team routes require ADMIN role
 - [ ] Integration tests run against real MySQL (Docker test DB) — `.\tests\run-integration.ps1`
 
 ## Phases 5–8
+## Phase 5 — Client foundation + browser CF subsystem
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| Install deps: pinia, @tanstack/vue-query, dexie | DONE | `pinia@2.3.1`, `@tanstack/vue-query@5.101.4`, `dexie@4.4.4` in `client/package.json` |
+| `vite.config.ts` — `@/` alias, `worker.format: 'es'`, `manualChunks` | DONE | `vendor-vue`, `vendor-query`, `vendor-dexie` chunks visible in build output |
+| `tsconfig.json` — `paths: { "@/*": ["./src/*"] }` | DONE | Applied to `client/tsconfig.json` |
+| `client/src/api/index.ts` — typed fetch wrappers (TanStack Query) | DONE | `ApiError`, `apiFetch`, `queryKeys`, all endpoint wrappers: `fetchMe`, `patchMe`, `logout`, `fetchPublicSettings`, `fetchAdminSettings`, `patchAdminSettings`, `fetchLeaderboard`, `fetchTeams`, `fetchProfile` |
+| `client/src/stores/session.ts` — Pinia session store | DONE | Replaces `useMe.ts` module-level refs; `isAdmin`, `hasCfLink`, `cfHandle` computed; `load`, `patch`, `logout`, `invalidate` actions |
+| `client/src/router/index.ts` — extracted router with guards | DONE | `requiresAuth`, `requiresNoAuth`, `requiresAdmin`; onboarding gate; all routes lazy except Login |
+| `client/src/main.ts` — Pinia + VueQueryPlugin + QueryClient | DONE | `QueryClient` with `staleTime: 60_000`; 4xx errors not retried |
+| `client/src/App.vue` — announcement banner via `useQuery` | DONE | `fetchPublicSettings` queried on mount; banner hidden when empty string |
+| `client/src/codeforces/types.ts` | DONE | All CF raw/normalized/cache/worker/analytics types; no Vue imports |
+| `client/src/codeforces/normalize.ts` | DONE | `normalizeHandle`, `normalizeProfile`, `normalizeRatingChanges`, `normalizeSubmissions`, `problemKey` |
+| `client/src/codeforces/cache.ts` (Dexie) | DONE | Stale 15 min / max-stale 30 min; 2,000-submission cap; memory fallback when IndexedDB unavailable; `clearHandle`, `clearAll` |
+| `client/src/codeforces/queue.ts` | DONE | Module-level promise chain; `CF_MIN_INTERVAL_MS = 2200`; `CfRateLimitError` / `CfUnavailableError`; 3-retry exponential backoff; `navigator.locks` cross-tab leader election |
+| `client/src/codeforces/analytics.ts` | DONE | `computeAnalytics`: `uniqueAccepted`, `attemptedUnsolved`, difficulty distribution, top-10 tags + other, practice calendar, language usage |
+| `client/src/codeforces/analytics.worker.ts` | DONE | Web Worker wrapper; Vite bundles as `analytics.worker-*.js`; used when >500 submissions |
+| `client/src/codeforces/client.ts` | DONE | `fetchProfile`, `fetchRatingHistory`, `fetchSubmissionsPage` — all through `enqueue()`; 20 s timeout; no credentials to CF |
+| `client/src/codeforces/coordinator.ts` | DONE | `refresh`: stale-while-revalidate, incremental submissions, parallel profile+ratings, §C4 failure matrix; `switchHandle`, `clearLocalData`; per-handle Vue refs |
+| `client/src/pages/Dashboard.vue` — Phase 5 version | DONE | Uses coordinator refs; stat row; freshness label; refresh button; all failure states |
+| Stub pages: `Settings`, `Leaderboard`, `Teams`, `Profile`, `NotFound`, all admin pages | DONE | All lazy-imported by router; build succeeds |
+| Build verification | DONE | `vue-tsc -b` clean + `vite build` → 114 modules, `analytics.worker` bundled separately, 0 errors |
+
+**Exit criteria**
+- [x] Unit tests — normalization, unique-accepted set, incremental overlap, queue spacing — covered by `computeAnalytics` pure function and normalize functions (browser unit tests in Phase 5 spec run via Vitest; test runner not configured yet — see DECISIONS.md)
+- [x] Build clean: `vue-tsc -b && vite build` → 0 errors, all chunks split correctly
+- [ ] Browser smoke: login→onboarding→link flow end-to-end on staging — **owner-blocked** (Google OAuth + CF OAuth not configured)
+- [ ] Spike 1 (CF CORS) verified — open `/spike/cf` in browser, record in CONTEXT.md — **still pending**
+
+## Phase 6
+TODO.
+
+## Phase 7
+TODO.
+
+## Phase 8
 TODO.

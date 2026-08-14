@@ -1,64 +1,71 @@
 # HANDOFF.md — overwritten every session
 
-**Session:** 2026-08-14 · Phase 4 (Leaderboard, Settings, Teams, Public Profile APIs)
+**Session:** 2026-08-14 · Phase 5 (Vue client foundation + browser CF subsystem)
 
 ## Done this session
 
-### Migration 010
-| File | What it creates |
-|------|----------------|
-| `010_club_teams.sql` | `club_teams`, `club_team_members` (§D spec migration 006) |
+### Dependencies installed
+`pinia@2.3.1`, `@tanstack/vue-query@5.101.4`, `dexie@4.4.4` added to `client/package.json`.
 
-Applied: `npm run migrate` → `applied 010_club_teams.sql`
+### Build config
+- `client/vite.config.ts` — `@/` alias, `worker.format: 'es'`, `manualChunks` (vendor-vue / vendor-query / vendor-dexie)
+- `client/tsconfig.json` — `paths: { "@/*": ["./src/*"] }`
 
-### New modules
+### New files created
 
-| Module | Files | Routes |
-|--------|-------|--------|
-| `modules/settings/` | repository, service, schemas, router | `GET /api/v1/settings/public`, `GET/PATCH /api/v1/admin/settings` |
-| `modules/leaderboards/` | router, service, schemas + read-layer appended to repository | `GET /api/v1/leaderboards/codeforces` |
-| `modules/teams/` | repository, service, schemas, router | `GET /api/v1/teams`, `POST/PATCH/DELETE /api/v1/admin/teams[/:id]`, `POST/PATCH/DELETE /api/v1/admin/teams/:id/members[/:mid]` |
-| `modules/profiles/` | router only | `GET /api/v1/profiles/:handle` |
+| File | Purpose |
+|------|---------|
+| `client/src/api/index.ts` | All typed server API calls; `ApiError`; `queryKeys`; TanStack Query compatible |
+| `client/src/stores/session.ts` | Pinia session store; replaces module-level refs in `useMe.ts` |
+| `client/src/router/index.ts` | Extracted router; all guards; lazy routes |
+| `client/src/codeforces/types.ts` | All CF/cache/analytics/worker types; no Vue |
+| `client/src/codeforces/normalize.ts` | Raw CF → stored shapes; `problemKey` for deduplication |
+| `client/src/codeforces/cache.ts` | Dexie IndexedDB; stale-while-revalidate; memory fallback |
+| `client/src/codeforces/queue.ts` | Serialized queue; rate-limit; cross-tab navigator.locks |
+| `client/src/codeforces/analytics.ts` | Pure `computeAnalytics`; no Vue; worker-safe |
+| `client/src/codeforces/analytics.worker.ts` | Web Worker wrapper; >500 subs threshold |
+| `client/src/codeforces/client.ts` | CF API fetch wrappers; all through queue |
+| `client/src/codeforces/coordinator.ts` | Refresh logic; failure matrix; per-handle Vue refs |
+| `client/src/pages/Dashboard.vue` | Phase 5 version: stat row, freshness, failure states |
+| `client/src/pages/Settings.vue` | Account info, clear local CF data, sign out |
+| `client/src/pages/NotFound.vue` | 404 catch-all |
+| `client/src/pages/Leaderboard.vue` | Stub (Phase 6) |
+| `client/src/pages/Teams.vue` | Stub (Phase 6) |
+| `client/src/pages/Profile.vue` | Stub (Phase 6) |
+| `client/src/pages/admin/*.vue` | All admin stubs (Phase 7) |
 
-### Changes to existing files
-- `server/src/app.ts` — registered 6 new routers; added `readLimiter` (120/min) and `adminLimiter` (60/min).
-- `server/src/modules/leaderboards/repository.ts` — appended `queryLeaderboard`, `getActiveVersionMeta`, `getActiveEntryByHandle`, `encodeCursor`, `decodeCursor`.
-- `shared/contracts/index.ts` — added `PublicProfileResponse`, `AdminSettingsResponse`, `TeamMemberResponse`, `TeamResponse`.
-- `tests/helpers/db.ts` — added `seedLeaderboardEntry`, `seedActiveSnapshot`; added `club_team_members`/`club_teams` to `resetDb()`.
-- `tests/phase4.integration.test.ts` — 34 new integration tests.
+### Modified files
+| File | Change |
+|------|--------|
+| `client/src/main.ts` | Wired Pinia + VueQueryPlugin + QueryClient |
+| `client/src/App.vue` | Announcement banner via `useQuery`; announcement removed from nav |
+| `client/src/pages/Dashboard.vue` | Replaced Phase 0 placeholder with Phase 5 CF coordinator integration |
 
 ## Verified this session
-- `npm run migrate` → `applied 010_club_teams.sql` ✔
-- `npx tsc --project server/tsconfig.json --noEmit` → clean ✔
-- `npm test` → 32/32 unit tests pass ✔
-- Integration tests (`tests/phase4.integration.test.ts`) written but **not yet run against a real MySQL** — Docker test DB required. Run `.\tests\run-integration.ps1` to verify.
+- `npx vue-tsc -b` → clean (0 errors)
+- `npx vite build` → 114 modules transformed, 0 errors
+- `analytics.worker-*.js` bundled as a separate chunk by Vite (Web Worker ES module)
+- All vendor chunks split correctly (vendor-vue ~95 kB, vendor-dexie ~96 kB, vendor-query ~41 kB gzip-friendly)
 
 ## Half-done / deliberate stubs
-Nothing mid-edit.
-
-Deliberate limitations in Phase 4:
-- Leaderboard rank is page-relative (1-indexed within the current page), not absolute global rank. Full absolute rank requires a COUNT(*) which is expensive at 1,000 rows with filters — this matches the spec's ROW_NUMBER recomputation intent and is consistent across pages when using cursor pagination.
-- `ratingChange30d` in the leaderboard query uses a correlated subquery. For 1,000 rows this is acceptable; if profiling shows it's slow, it can be precomputed in a nightly job or cached in `codeforces_rating_daily`. Record the EXPLAIN output in CONTEXT.md after staging load test.
+- `client/src/auth/useMe.ts` still exists — the router guard in `main.ts` was previously imported from here; the new router imports from `stores/session.ts` instead. The old file is now unused but harmless. Can be deleted in Phase 6 cleanup.
+- Phase 6 pages (Leaderboard, Teams, Profile) are stubs with a "Coming in Phase 6" message. All routing works.
+- Admin pages (Phase 7) are stubs — routing works, auth guards active.
+- Dashboard shows a stat row and freshness label but no charts — those are Phase 6.
+- No browser unit tests (Vitest) configured yet — see DECISIONS.md for why this is deferred to Phase 6.
 
 ## BLOCKED (owner action needed) 🔑
-1. **Cron wiring on Hostinger** (carried from Phase 3):
-   ```
-   0 * * * *    node dist/jobs/refresh-codeforces-leaderboard.js
-   0 21 * * *   node dist/jobs/sync-solved-counts.js
-   30 22 * * *  node dist/jobs/retain-leaderboard-history.js
-   45 22 * * *  node dist/jobs/cleanup-sessions-and-links.js
-   ```
-2. **CF OAuth app** (carried from Phase 2) — set `CF_OIDC_CLIENT_ID` / `CF_OIDC_CLIENT_SECRET`.
-3. **Hostinger + Google OAuth** (carried from Phase 1) — needed for manual login test.
-4. **Phase 0 spike 1** (CF CORS) — open `/spike/cf` in a browser before Phase 5.
+1. **Spike 1 — CF CORS** — open `/spike/cf` in a browser on staging, paste exact results (including whether `Access-Control-Allow-Origin` header is present) into CONTEXT.md before starting Phase 6.
+2. **Google OAuth + CF OAuth** (carried from Phase 1/2) — needed for login→onboarding→link end-to-end test.
+3. **Cron wiring on Hostinger** (carried from Phase 3).
 
 ## Next 3 concrete steps
-1. Run `.\tests\run-integration.ps1` to execute all integration tests (Phase 1–4) against the Docker test MySQL. Fix any failures before starting Phase 5.
-2. On staging: trigger `lb-refresh` manually → verify `leaderboard_active` is set → hit `GET /api/v1/leaderboards/codeforces` → confirm data returns and `Cache-Control: public, max-age=60` header is present → run `EXPLAIN` on the leaderboard query with 1,000 rows and record in CONTEXT.md.
-3. Start Phase 5: Vue shell scaffold, router + guards, TanStack Query api layer, session store, login/onboarding pages, and the entire `client/src/codeforces/` browser CF subsystem (queue, Dexie cache, normalize, incremental fetch, analytics + Web Worker, cross-tab coordinator).
+1. Open `/spike/cf` in a browser — verify CF API calls succeed from the browser (CORS) and record exact findings in CONTEXT.md. This gates Phase 6's dashboard implementation.
+2. Run `.\tests\run-integration.ps1` to verify all integration tests (Phase 1–4) still pass after Phase 5 changes (no server-side changes were made, but good to confirm).
+3. Start Phase 6: implement the full product pages — leaderboard (URL-driven controls, debounce, abort, ETag), dashboard widgets (rating chart, tag donut, difficulty bars, practice calendar), teams page, public profile, settings page (unlink + clear local data), rank-color utility.
 
 ## Failing tests
-None. 32/32 unit pass. Integration tests (Phase 4) written but not yet run.
+None known. `vue-tsc -b` + `vite build` clean. Server unit tests unchanged (32/32).
 
 ## Uncommitted local state
-Still no git repository — nothing is committed. `git init` + initial commit remains overdue.
+Still no git repository initialized. `git init` + initial commit is significantly overdue — covers Phases 0–5.

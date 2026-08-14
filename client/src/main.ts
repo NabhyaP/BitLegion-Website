@@ -1,40 +1,28 @@
 import { createApp } from 'vue';
-import { createRouter, createWebHistory } from 'vue-router';
+import { createPinia } from 'pinia';
+import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import App from './App.vue';
-import Hello from './pages/Hello.vue';
-import CfSpike from './pages/CfSpike.vue';
-import Login from './pages/Login.vue';
-import { useMe } from './auth/useMe.ts';
+import { router } from './router/index.ts';
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
-    { path: '/', component: Hello },
-    { path: '/login', component: Login },
-    { path: '/spike/cf', component: CfSpike },
-    // Lazy: keeps the login path's bundle small (§B4 route-level code splitting).
-    {
-      path: '/onboarding',
-      component: () => import('./pages/Onboarding.vue'),
-      meta: { requiresAuth: true },
+const pinia = createPinia();
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Stale-while-revalidate: treat data as stale after 60 s
+      staleTime: 60_000,
+      // Retry once on failure (network blip), but not on 4xx
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number }).status;
+        if (status && status >= 400 && status < 500) return false;
+        return failureCount < 1;
+      },
     },
-    {
-      path: '/dashboard',
-      component: () => import('./pages/Dashboard.vue'),
-      meta: { requiresAuth: true },
-    },
-    { path: '/:pathMatch(.*)*', component: Hello },
-  ],
+  },
 });
 
-router.beforeEach(async (to) => {
-  if (!to.meta.requiresAuth) return true;
-  const { load } = useMe();
-  const me = await load();
-  if (!me) return { path: '/login', query: { returnTo: to.fullPath } };
-  // Server still enforces everything; this only saves a round trip.
-  if (!me.profileConfirmed && to.path !== '/onboarding') return '/onboarding';
-  return true;
-});
-
-createApp(App).use(router).mount('#app');
+createApp(App)
+  .use(pinia)
+  .use(router)
+  .use(VueQueryPlugin, { queryClient })
+  .mount('#app');

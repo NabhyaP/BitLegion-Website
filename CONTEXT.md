@@ -167,10 +167,65 @@ in the same transaction. Action codes: `team.create`, `team.update`, `team.delet
 (`show_in_leaderboard = 0`), suspended user, no active snapshot. Never 403 — this prevents
 enumeration of which users exist but are hidden (§G).
 
+## Browser CF subsystem (Phase 5)
+
+### CF API CORS status
+**PENDING** — Spike 1 not yet run. Open `/spike/cf` in a browser before implementing Phase 6
+dashboard. If CF does NOT send `Access-Control-Allow-Origin`, the personal-dashboard design in
+§A1/§C must be revisited immediately (flag to owner).
+
+### Codeforces subsystem architecture
+```
+coordinator.ts          ← Vue composables call this; holds per-handle Vue refs
+  ├── client.ts         ← CF API fetch (fetchProfile / fetchRatingHistory / fetchSubmissionsPage)
+  │     └── queue.ts    ← Serialized promise chain; navigator.locks cross-tab; rate-limit
+  ├── cache.ts          ← Dexie IndexedDB; memory fallback; stale-while-revalidate
+  ├── normalize.ts      ← Raw CF → stored shapes; problemKey deduplication
+  └── analytics.ts      ← Pure computation; used inline (<500 subs) or via worker (>500 subs)
+        └── analytics.worker.ts  ← Web Worker; Vite bundles as separate ES chunk
+```
+
+### Queue serialization
+`queue.ts` uses a module-level `_chain` promise (same pattern as `shared/cf-client.ts` on the
+server). All calls from any part of the client share one queue per tab. Cross-tab: `navigator.locks`
+with `ifAvailable: true` — only the leader tab runs refreshes. Non-leader tabs skip network but
+still serve from IndexedDB.
+
+### Stale-while-revalidate windows
+- Fresh: <15 min since last fetch → serve from cache, no network call
+- Stale window: 15–30 min → serve cache immediately + trigger background revalidation
+- Stale: >30 min → show stale label, trigger revalidation
+
+### Incremental submissions algorithm
+1. First visit: fetch pages of 500 up to 2,000-cap; `lastSubmissionId` recorded
+2. Subsequent visits: fetch page 1 (newest); if any `id ≤ lastSubmissionId` → stop; upsert new rows
+3. `INSERT IGNORE` semantics in `cache.ts.upsertSubmissions` (bulkPut — Dexie overwrites on key)
+4. Cap enforced: keep newest 2,000 by submissionId; older submissions dropped
+
+### Problem key format (deduplication)
+```
+standard contest:  "${contestId}-${index}"      e.g. "1234-A"
+gym / problemset:  "ps:${setName}:${name}"      fallback when contestId absent
+```
+Same key for re-submissions of the same problem → `uniqueAccepted` counts problems, not submissions.
+
+### Session store (Pinia)
+`client/src/stores/session.ts` replaces `auth/useMe.ts` module-level refs. The old `useMe.ts`
+file still exists but is no longer imported anywhere — safe to delete in Phase 6 cleanup.
+The new store exposes `isAdmin`, `hasCfLink`, `cfHandle` computed properties for use in
+route guards and components without additional fetching.
+
+### TanStack Query usage
+`@tanstack/vue-query` is used for server-state: `/settings/public`, `/leaderboard`, `/teams`,
+`/profiles/:handle`. Personal CF data (profile, ratings, submissions) is managed by the
+coordinator's own Vue refs + Dexie — NOT by TanStack Query, because it needs custom staleness
+logic and cross-tab coordination that Query's model doesn't fit.
+
 ## Testing
 ```
-npm test                  # unit — no DB needed; runs rollno/permissions/cf-client tests (~115 s due to real retry delays)
+npm test                   # unit — no DB needed; runs rollno/permissions/cf-client tests (~115 s)
 npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; all integration tests
+# client unit tests — Vitest not yet configured (see DECISIONS.md); deferred to Phase 6
 ```
 Unit test count: **32** (10 Phase 1/2 + 22 Phase 3 cf-client).
 Integration test count: **83** expected (32 Phase 1/2 + 17 Phase 3 jobs + 34 Phase 4) — run via `.\tests\run-integration.ps1`.

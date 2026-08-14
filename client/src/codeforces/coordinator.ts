@@ -1,0 +1,309 @@
+/**
+ * CF data coordinator (§C — incremental fetch, failure matrix, analytics dispatch).
+ *
+ * This is the single entry point that Vue composables call.
+ * Implements the full §C4 failure matrix:
+ *   CF unavailable     → serve cached + stale timestamp
+ *   Rate limit         → stop queue, keep cache, manual retry later
+ *   First visit no cache → compact error, rest of site usable
+ *   One method fails   → keep successful widgets, mark failed ones
+ *   Handle changed     → clear old cache first
+ *   Storage unavailable → memory-only + notice
+ *
+ * Incremental submissions: first visit pages up to 2,000-cap; later visits
+ * fetch newest page and stop when overlap with lastSubmissionId is found.
+ *
+ * No Vue imports.
+ */
+import { ref, readonly } from 'vue';
+import * as cfClient from './client.ts';
+import * as cache from './cache.ts';
+import { computeAnalytics } from './analytics.ts';
+import { tryBecomeLeader, releaseLeader, CfRateLimitError, CfUnavailableError, setRateLimited } from './queue.ts';
+import type { CfProfile, CfRatingPoint, CfSubmission, AnalyticsResult, FetchStatus } from './types.ts';
+
+const INCREMENTAL_MAX_PAGES = 4; // 4 × 500 = 2,000 cap
+const PAGE_SIZE = 500;
+const WORKER_THRESHOLD = 500; // use Web Worker above this count
+
+// ---------------------------------------------------------------------------
+// Per-handle reactive state (Vue refs — this file IS allowed Vue imports
+// because it is the bridge layer, not a pure compute module)
+// ---------------------------------------------------------------------------
+
+export type HandleData = {
+  profile: CfProfile | null;
+  ratings: CfRatingPoint[];
+  submissions: CfSubmission[];
+  analytics: AnalyticsResult | null;
+  status: FetchStatus;
+  lastSuccessAt: number | null;
+  stale: boolean;
+  storageUnavailable: boolean;
+  errorMessage: string | null;
+};
+
+const _handles = new Map<string, ReturnType<typeof createHandleRefs>>();
+
+function createHandleRefs(handle: string) {
+  const profile = ref<CfProfile | null>(null);
+  const ratings = ref<CfRatingPoint[]>([]);
+  const submissions = ref<CfSubmission[]>([]);
+  const analytics = ref<AnalyticsResult | null>(null);
+  const status = ref<FetchStatus>('idle');
+  const lastSuccessAt = ref<number | null>(null);
+  const stale = ref(false);
+  const errorMessage = ref<string | null>(null);
+  const storageUnavailable = ref(false);
+  return { handle, profile, ratings, submissions, analytics, status, lastSuccessAt, stale, errorMessage, storageUnavailable };
+}
+
+export function getHandleRefs(handle: string) {
+  const norm = handle.toLowerCase();
+  if (!_handles.has(norm)) _handles.set(norm, createHandleRefs(norm));
+  return _handles.get(norm)!;
+}
+
+// ---------------------------------------------------------------------------
+// Worker setup (lazy)
+// ---------------------------------------------------------------------------
+
+let _worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!_worker) {
+    // Vite resolves the worker URL at build time
+    _worker = new Worker(
+      new URL('./analytics.worker.ts', import.meta.url),
+      { type: 'module' },
+    );
+  }
+  return _worker;
+}
+
+function computeInWorker(subs: CfSubmission[]): Promise<AnalyticsResult> {
+  return new Promise((resolve, reject) => {
+    const w = getWorker();
+    const handler = (e: MessageEvent) => {
+      w.removeEventListener('message', handler);
+      if (e.data.type === 'result') resolve(e.data.result);
+      else reject(new Error(e.data.message));
+    };
+    w.addEventListener('message', handler);
+    w.postMessage({ type: 'compute', submissions: subs });
+  });
+}
+
+async function runAnalytics(subs: CfSubmission[]): Promise<AnalyticsResult> {
+  if (subs.length > WORKER_THRESHOLD) {
+    return computeInWorker(subs);
+  }
+  return computeAnalytics(subs);
+}
+
+// ---------------------------------------------------------------------------
+// Main refresh entry point
+// ---------------------------------------------------------------------------
+
+const _refreshing = new Set<string>();
+
+/**
+ * Refresh data for a handle. Safe to call concurrently — deduplicated per handle.
+ * Returns immediately if another refresh for the same handle is in progress.
+ */
+export async function refresh(rawHandle: string): Promise<void> {
+  const handle = rawHandle.toLowerCase();
+  if (_refreshing.has(handle)) return;
+
+  const refs = getHandleRefs(handle);
+
+  // Try cross-tab leader lock; if another tab owns it, skip (they'll update)
+  const isLeader = await tryBecomeLeader();
+  if (!isLeader) {
+    refs.status.value = 'revalidating';
+    return;
+  }
+
+  _refreshing.add(handle);
+  refs.storageUnavailable.value = cache.isStorageUnavailable();
+
+  try {
+    // Load cached data immediately so UI can show stale-while-revalidate
+    const [cachedProfile, cachedRatings, cachedSubs, meta] = await Promise.all([
+      cache.getProfile(handle),
+      cache.getRatings(handle),
+      cache.getSubmissions(handle),
+      cache.getMeta(handle),
+    ]);
+
+    if (cachedProfile) refs.profile.value = cachedProfile;
+    if (cachedRatings) refs.ratings.value = cachedRatings;
+    if (cachedSubs.length) refs.submissions.value = cachedSubs;
+
+    const hadCache = !!cachedProfile;
+    const profileFresh = cache.isFresh(meta?.profileFetchedAt ?? null);
+    const profileStaleWindow = cache.isWithinStaleWindow(meta?.profileFetchedAt ?? null);
+    refs.stale.value = !profileFresh && hadCache;
+    refs.lastSuccessAt.value = meta?.profileFetchedAt ?? null;
+    refs.status.value = hadCache ? (profileFresh ? 'success' : 'revalidating') : 'loading';
+
+    // Skip network if everything is fresh
+    if (profileFresh && cache.isFresh(meta?.ratingsFetchedAt ?? null)) {
+      if (cachedSubs.length > 0) {
+        refs.analytics.value = await runAnalytics(cachedSubs);
+      }
+      refs.status.value = 'success';
+      return;
+    }
+
+    // Fetch profile + ratings in parallel, submissions separately (incremental)
+    let profileOk = profileStaleWindow; // if stale-window, we already have usable cached data
+    let ratingsOk = cache.isWithinStaleWindow(meta?.ratingsFetchedAt ?? null);
+
+    const [profileResult, ratingsResult] = await Promise.allSettled([
+      profileFresh ? Promise.resolve(cachedProfile!) : cfClient.fetchProfile(handle),
+      cache.isFresh(meta?.ratingsFetchedAt ?? null) ? Promise.resolve(cachedRatings ?? []) : cfClient.fetchRatingHistory(handle),
+    ]);
+
+    if (profileResult.status === 'fulfilled') {
+      refs.profile.value = profileResult.value;
+      await cache.setProfile(handle, profileResult.value);
+      profileOk = true;
+    } else {
+      handleFetchError(profileResult.reason, refs);
+    }
+
+    if (ratingsResult.status === 'fulfilled') {
+      refs.ratings.value = ratingsResult.value;
+      await cache.setRatings(handle, ratingsResult.value);
+      ratingsOk = true;
+    } else {
+      handleFetchError(ratingsResult.reason, refs);
+    }
+
+    // Incremental submissions fetch
+    const subsOk = await fetchSubmissionsIncremental(handle, meta?.lastSubmissionId ?? 0, refs);
+
+    // Compute analytics from whatever we have
+    const allSubs = await cache.getSubmissions(handle);
+    if (allSubs.length > 0) {
+      refs.submissions.value = allSubs;
+      refs.analytics.value = await runAnalytics(allSubs);
+    }
+
+    // Set final status
+    if (profileOk || ratingsOk || subsOk) {
+      refs.status.value = 'success';
+      refs.lastSuccessAt.value = Date.now();
+      refs.stale.value = false;
+      refs.errorMessage.value = null;
+    } else if (!hadCache) {
+      refs.status.value = 'error';
+    }
+  } catch (err) {
+    handleFetchError(err, refs);
+  } finally {
+    _refreshing.delete(handle);
+    releaseLeader();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Incremental submissions fetch (§C incremental fetch algorithm)
+// ---------------------------------------------------------------------------
+
+async function fetchSubmissionsIncremental(
+  handle: string,
+  lastId: number,
+  refs: ReturnType<typeof createHandleRefs>,
+): Promise<boolean> {
+  let from = 1;
+  let pagesFetched = 0;
+  let anyNewData = false;
+
+  while (pagesFetched < INCREMENTAL_MAX_PAGES) {
+    let page: CfSubmission[];
+    try {
+      page = await cfClient.fetchSubmissionsPage(handle, from, PAGE_SIZE);
+    } catch (err) {
+      handleFetchError(err, refs);
+      break;
+    }
+
+    if (page.length === 0) break; // no more submissions
+
+    // Stop condition: a submission on this page has id ≤ lastId — we've reached overlap
+    const overlap = page.some((s) => s.submissionId <= lastId);
+    const newSubs = lastId === 0 ? page : page.filter((s) => s.submissionId > lastId);
+
+    if (newSubs.length > 0) {
+      await cache.upsertSubmissions(handle, newSubs);
+      anyNewData = true;
+    }
+
+    if (overlap || page.length < PAGE_SIZE) break; // last page or caught up
+
+    from += PAGE_SIZE;
+    pagesFetched++;
+  }
+
+  return anyNewData;
+}
+
+// ---------------------------------------------------------------------------
+// Error handling per §C4 failure matrix
+// ---------------------------------------------------------------------------
+
+function handleFetchError(
+  err: unknown,
+  refs: ReturnType<typeof createHandleRefs>,
+): void {
+  if (err instanceof CfRateLimitError) {
+    setRateLimited(Date.now() + err.retryAfterMs);
+    refs.status.value = 'rate-limited';
+    refs.errorMessage.value = 'Codeforces rate limit reached. Please try again later.';
+  } else if (err instanceof CfUnavailableError) {
+    // Keep cached data (already loaded above); just mark stale
+    if (refs.profile.value) {
+      refs.status.value = 'success'; // has cache — usable
+      refs.stale.value = true;
+    } else {
+      refs.status.value = 'cf-unavailable';
+    }
+    refs.errorMessage.value = 'Codeforces is currently unavailable. Showing cached data.';
+  } else {
+    refs.status.value = 'error';
+    refs.errorMessage.value = err instanceof Error ? err.message : 'Unknown error.';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public helpers
+// ---------------------------------------------------------------------------
+
+/** Call when the user changes their CF handle — clears old cache before refresh. */
+export async function switchHandle(oldHandle: string | null, newHandle: string): Promise<void> {
+  if (oldHandle) {
+    const norm = oldHandle.toLowerCase();
+    await cache.clearHandle(norm);
+    _handles.delete(norm);
+  }
+  await refresh(newHandle);
+}
+
+/** "Clear local Codeforces data" action (§B4 settings page). */
+export async function clearLocalData(handle: string): Promise<void> {
+  const norm = handle.toLowerCase();
+  await cache.clearHandle(norm);
+  const refs = getHandleRefs(norm);
+  refs.profile.value = null;
+  refs.ratings.value = [];
+  refs.submissions.value = [];
+  refs.analytics.value = null;
+  refs.status.value = 'idle';
+  refs.lastSuccessAt.value = null;
+  refs.stale.value = false;
+  refs.errorMessage.value = null;
+}
+
+export { readonly };
