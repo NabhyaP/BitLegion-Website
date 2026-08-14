@@ -55,5 +55,32 @@ manual staging login, which stays open below.
 - [ ] Manual login on staging works — **owner-blocked** (no Hostinger app, no Google OAuth client)
 - [x] PROGRESS updated with test names
 
-## Phases 2–8
+## Phase 2 — Codeforces linking
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| Migration 006 — `codeforces_accounts`, `codeforces_link_attempts`, `codeforces_solved_state` | DONE | Applied cleanly by `run-integration.ps1`; logged `applied 006_cf_links.sql` |
+| `codeforces-links` module — types, repository, schemas, service, router | DONE | `server/src/modules/codeforces-links/` — 5 files |
+| CF OIDC start route (`GET /api/v1/codeforces/link/start`) | DONE | `cfLinksRouter`; requires `requireAuth` + `requireRecentAuth`; PKCE+state+nonce stored in session **and** DB |
+| CF OIDC callback route (`GET /api/v1/codeforces/link/callback`) | DONE | Validates session+DB attempt, calls `linkCfHandle()`; handle-taken → `cf-handle-taken` redirect |
+| Unlink route (`DELETE /api/v1/codeforces/link`) | DONE | Requires fresh auth; soft-deletes account row, removes solved_state, audits `cf.unlink` |
+| `linkCfHandle` / `unlinkCfHandle` services | DONE | Transactional; audit in same `conn`; handle-taken throws `HANDLE_TAKEN` 409 |
+| Seed `codeforces_solved_state` on link | DONE | `INSERT IGNORE` in `linkCfHandle` transaction |
+| `GET /me` — `codeforces` field populated | DONE | `meResponse()` now async; returns `{handle, status, verifiedAt}` or `null` for UNLINKED/absent |
+| Post-login redirect checks CF link | DONE | `auth/router.ts` callback: no active link → `/onboarding` |
+| `cfLinksRouter` registered in `app.ts` with `linkLimiter` (5/min) | DONE | `app.use('/api/v1/codeforces', linkLimiter, cfLinksRouter)` |
+| `SessionData` extended with `cfOauth` | DONE | `middleware/session.ts` module augmentation |
+| Shared contracts — `CfLinkStatus`, `CfLinkInfo`, `MeResponse` | DONE | `shared/contracts/index.ts` |
+| Integration tests — 18 new tests | DONE | `tests/cf-links.integration.test.ts`; 32/32 total pass (`npm run test:integration`) |
+| Manual live link on staging | BLOCKED | 🔑 needs CF OAuth app from owner (codeforces.com/settings/api) + `CF_OIDC_CLIENT_ID`/`CF_OIDC_CLIENT_SECRET` |
+
+**Exit criteria**
+- [x] Tampered/unknown state → `consumeLinkAttempt` returns null — `consumeLinkAttempt with an unknown state returns null (tampered state)` ✔
+- [x] Expired attempt → null — `consumeLinkAttempt with an expired attempt returns null` ✔
+- [x] Single-use — `consumeLinkAttempt is single-use: second call returns null` ✔
+- [x] Duplicate-handle conflict — `linking a handle already owned by ANOTHER user throws HANDLE_TAKEN` ✔
+- [x] Unlink clears state — `unlinkCfHandle sets status to UNLINKED and removes solved_state` ✔
+- [x] solved_state seeded on link — `linkCfHandle seeds a codeforces_solved_state row with zeroed counters` ✔
+- [ ] Live link succeeds on staging with a real CF account — **owner-blocked** (CF OAuth app)
+
+## Phases 3–8
 TODO.

@@ -1,64 +1,64 @@
 # HANDOFF.md — overwritten every session
 
-**Session:** 2026-08-14 · Phase 1 (Identity & accounts)
+**Session:** 2026-08-14 · Phase 2 (Codeforces linking)
 
-## Done
-- **Migrations** 003 `course_codes` (admin-editable, 15=CSE/16=ECE), 004 `profile_confirmed`,
-  005 `audit_events`. Runner proven up → down → re-up on MySQL 8.
-- **Auth** (`modules/auth/`): openid-client PKCE+state+nonce start, callback validating the ID
-  token then applying §B1 steps 2–8 in one transaction, logout. Redirect errors are exactly
-  `not-college-email | account-suspended | oauth-failure`.
-- **Users** (`modules/users/`): rollno parser (owner's `11|24|15|119` layout), repository holding
-  ALL user/role SQL, `GET /me`, `PATCH /me` with the one-time identity confirm, pure permission
-  matrix for role changes.
-- **Middleware**: session (express-mysql-session, rotation helpers), requireAuth / requireRole /
-  requireRecentAuth, requestId, error handler emitting the §F envelope with no stack or SQL.
-- **Audit** (`modules/audit/`): writes on the transaction connection so events commit with the
-  mutation they describe. Sign-in paths already emit `user.create` / `user.activate` / `role.grant`.
-- **Client**: `/login` (error banner from `?error=`), `/onboarding`, placeholder `/dashboard`,
-  `auth/useMe.ts` composable (all fetching lives there — templates stay presentation-only),
-  router guards with lazy-loaded routes.
+## Done this session
+
+### Migration
+- `006_cf_links.sql` — `codeforces_accounts`, `codeforces_link_attempts`,
+  `codeforces_solved_state`; applied cleanly by the integration test runner.
+
+### `server/src/modules/codeforces-links/`
+| File | What it does |
+|------|--------------|
+| `types.ts` | `CfLinkStatus`, `CfAccount`, `CfClaims` types |
+| `repository.ts` | All SQL for the three CF tables; `findAccountByUserId`, `findAccountByNormalizedHandle`, `upsertAccount`, `unlinkAccount`, `updateAccountStatus`, `createLinkAttempt`, `consumeLinkAttempt` (single-use, expiry-checked), `deleteExpiredAttempts`, `seedSolvedState`, `deleteSolvedState` |
+| `schemas.ts` | `cfCallbackQuerySchema` (zod, validates `code` + `state` presence) |
+| `service.ts` | `linkCfHandle` (upsert + solved-state seed + audit, all in one transaction); `unlinkCfHandle` (soft-unlink + solved-state delete + audit); `normalizeHandle` |
+| `router.ts` | `GET /api/v1/codeforces/link/start` (requireAuth + requireRecentAuth, PKCE+state+nonce stored in session AND DB); `GET /api/v1/codeforces/link/callback` (validates session+DB attempt, calls `linkCfHandle`, redirects `/dashboard?linked=1`); `DELETE /api/v1/codeforces/link` (requireAuth + requireRecentAuth, calls `unlinkCfHandle`) |
+
+### Changes to existing files
+- `server/src/middleware/session.ts` — `SessionData` extended with `cfOauth?: {state,nonce,verifier}` (separate from `oauth` to avoid confusion with Google flow).
+- `server/src/modules/auth/router.ts` — post-login redirect now checks CF link existence; no active link → `/onboarding` (previously only checked `isNew || !profileConfirmed`).
+- `server/src/modules/users/router.ts` — `meResponse()` is now `async`; fetches `cfRepo.findAccountByUserId` and returns `{handle,status,verifiedAt}` or `null` for UNLINKED/absent. Phase 2 `codeforces: null` placeholder removed.
+- `server/src/app.ts` — `linkLimiter` (5 req/min) added; `cfLinksRouter` registered at `/api/v1/codeforces` before the catch-all 404.
+- `shared/contracts/index.ts` — `CfLinkStatus`, `CfLinkInfo`, `MeResponse` types added.
+- `tests/helpers/db.ts` — `resetDb()` now truncates `codeforces_solved_state`, `codeforces_link_attempts`, `codeforces_accounts`; `seedCfLink()` helper added.
+- `tests/cf-links.integration.test.ts` — 18 new tests (see PROGRESS.md for list).
 
 ## Verified this session
-- `npm test` → **10/10 unit** (parser incl. the `iiitp.ac.in.evil.com` rejection; permission
-  matrix incl. self-edit forbidden and ADMIN-cannot-grant-ADMIN).
-- `npm run test:integration` → **14/14** against real MySQL 8: accept/reject sign-in paths,
-  unverified-email rejection, suspended rejection, pre-provisioned PENDING→ACTIVE activation,
-  duplicate-google-sub conflict, audit-row-on-every-path, session rotation, mid-session suspension,
-  one-time confirm lock, strict-schema rejection of injected `status`.
-- `npm run build` green in both workspaces (client 97 kB / 38 kB gzip with split chunks).
+- `npm test` → **10/10 unit** (unchanged from Phase 1).
+- `npm run test:integration` → **32/32** (18 new + 14 Phase 1; migration 006 applied cleanly).
 
 ## Half-done
-Nothing mid-edit. Two deliberate stubs, both marked in code:
-- `/me` returns `codeforces: null` — Phase 2 fills it in.
-- `/dashboard` is a placeholder page; the real widgets are Phase 6.
+Nothing mid-edit.
+
+One deliberate stub still in code:
+- `GET /api/v1/codeforces/link/start` and `/callback` will return an HTTP 500
+  (the `cfConfig()` rejects with "not configured") until `CF_OIDC_CLIENT_ID`/`CF_OIDC_CLIENT_SECRET`
+  are set. The service layer is complete and tested; only the OIDC network leg is missing.
 
 ## BLOCKED (owner action needed) 🔑
-1. **Hostinger:** Node app (pinned LTS) + MySQL. Blocks Phase 0 spikes 3 & 4, deployment, and the
-   Phase 1 "manual login on staging" exit criterion.
-2. **Google Cloud:** OAuth 2.0 Web client, redirect `https://<domain>/api/v1/auth/google/callback`
-   → GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. **The auth code is complete but has never run
-   against real Google** — only against verified-claims fixtures.
-3. **Codeforces:** OAuth app at codeforces.com/settings/api, redirect
-   `https://<domain>/api/v1/codeforces/link/callback`. Blocks Phase 0 spike 2 and all of Phase 2.
-4. **Phase 0 spike 1 (CF CORS)** is still unrun: open `/spike/cf` in a browser. If CF blocks
-   cross-origin reads, §A1/§C's whole personal-data design must change before Phase 5.
+1. **Codeforces:** OAuth app at `codeforces.com/settings/api`, redirect URI
+   `https://<domain>/api/v1/codeforces/link/callback`.
+   → Set `CF_OIDC_CLIENT_ID` and `CF_OIDC_CLIENT_SECRET` in the Hostinger env panel.
+   → Then do one end-to-end live link on staging and tick the last Phase 2 exit criterion.
+2. **Hostinger + Google OAuth** (carried over from Phase 1) — still needed for the manual
+   login test.
+3. **Phase 0 spike 1** (CF CORS) — still unrun; open `/spike/cf` in a browser before Phase 5.
 
 ## Next 3 concrete steps
-1. Once the Google client exists: set GOOGLE_CLIENT_ID/SECRET and do one real end-to-end login on
-   staging with a college account, then tick the last Phase 1 exit criterion. Watch for the
-   `hd`-vs-suffix behaviour with department subdomains.
-2. Run the CF CORS spike and record the exact result in the CONTEXT.md spike table.
-3. Start Phase 2 (§B2 Codeforces linking): migration 002 `codeforces_accounts` +
-   `codeforces_link_attempts`, the link start/callback/unlink routes, handle-taken conflict, and
-   seeding `codeforces_solved_state` on link. The OIDC plumbing in `modules/auth/router.ts` is the
-   template to follow.
+1. Owner creates the CF OAuth app → sets the two env vars → agent does one live link on staging.
+2. Start Phase 3: `shared/cf-client.ts` (serialized CF API client, §E1) + Job 1 (leaderboard
+   snapshot, §E2) + migrations 003 (leaderboard tables) and 004 (solved_problems).
+   Note: migrations 003–005 in the spec correspond to the NEW tables in §D; they will be
+   numbered 007+ here because 003–006 are already used. Check DECISIONS.md before creating.
+3. Run Phase 0 CF CORS spike from a browser and record results in `CONTEXT.md` spike table
+   before Phase 5 client work begins.
 
 ## Failing tests
-None. 10/10 unit, 14/14 integration.
+None. 10/10 unit, 32/32 integration.
 
 ## Uncommitted local state
-Still **not a git repository** — nothing is committed. `git init` plus an initial commit should be
-the next session's first action (or the owner's).
-A Docker container `bitlegion-test-mysql` may be left running on port 3307; it is disposable
-(`docker rm -f bitlegion-test-mysql`) and the test script recreates it.
+Still **no git repository** — nothing is committed. `git init` + initial commit is overdue.
+Docker container `bitlegion-test-mysql` may be running on port 3307 (disposable).

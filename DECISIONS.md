@@ -23,3 +23,11 @@ Format: `YYYY-MM-DD | decision | why | alternatives rejected`
 2026-08-14 | TS parameter properties avoided in server code | Node's `--experimental-strip-types` (used for dev and tests) rejects them with ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX | Adding a transpile step for tests (slower, and diverges from how production runs)
 
 2026-08-14 | `shared/contracts` and `tests/` created as placeholders only | §A2 mandates the layout, but inventing contracts before Phase 1 endpoints exist would be speculative | Omitting them (next session wouldn't know they're expected)
+
+2026-08-14 | CF link attempts persisted in both the session AND `codeforces_link_attempts` DB table | Session alone is lost on server restart between start and callback; DB row adds durability and an expiry the DB enforces independently. `consumeLinkAttempt` is the authoritative single-use gate; the session copy is a fast consistency cross-check | Session only (not crash-safe); DB only (extra query on every /me hit — unnecessary)
+
+2026-08-14 | CF OIDC `sub` claim used as the handle identifier, with a `handle` claim fallback | CF OIDC documentation shows `sub` = the CF handle (it is the account's primary identifier); a dedicated `handle` claim may be added by CF later — the fallback future-proofs this | Fetching user.info from CF API on the callback (extra CF call, extra latency, not needed since OIDC already proves ownership)
+
+2026-08-14 | `unlinkCfHandle` is a soft delete (status = 'UNLINKED') not a hard DELETE | Historical leaderboard snapshots reference `codeforces_accounts.handle` via the snapshot's own denormalised `handle` column; a hard delete would only cascade-delete the account row, not the snapshot copies, so nothing is actually lost — but keeping the row makes admin reconciliation easier | Hard DELETE (spec says "historical leaderboard entries keep the handle used at that time" — satisfied by snapshot denormalisation either way, but soft delete is safer)
+
+2026-08-14 | `meResponse()` in `users/router.ts` made async to fetch CF link inline | The simplest change with no architectural shift; one extra DB query per `/me` call (indexed PK lookup on `user_id`, negligible). No need for a separate `/me/codeforces` endpoint | Caching the CF link in the session (stale after unlink/re-link until next login); returning it only from a sub-route (extra round-trip for the client)

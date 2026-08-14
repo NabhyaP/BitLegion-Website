@@ -62,6 +62,63 @@ The integration script (`tests/run-integration.ps1`) starts container `bitlegion
 (root/testpw, db `bitlegion_test`) if it isn't already running. **Port 3307, because the owner's
 machine already has a MySQL on 3306** whose credentials we don't have.
 
+## CF OIDC linking module (Phase 2)
+
+### Architecture decision: link attempts stored in both session AND DB
+PKCE+state+nonce are written to `codeforces_link_attempts` (10-min TTL) at the same time as
+the session. The DB copy survives a server restart between the start and callback requests;
+the session copy is used as a fast consistency check. `consumeLinkAttempt` deletes the row
+on first read regardless of outcome — single-use by construction.
+
+### CF `sub` claim is the handle
+CF OIDC uses the Codeforces handle as the `sub` claim. `router.ts` also checks for a
+dedicated `handle` claim in case CF adds one, but falls back to `sub`. Handles are
+normalised to lowercase (`normalizeHandle()`).
+
+### Re-link path
+`upsertAccount` uses `INSERT … ON DUPLICATE KEY UPDATE` on the `user_id` UNIQUE key.
+`linkCfHandle` sets `wasRelink = true` when a previous non-UNLINKED row existed and includes
+the old handle in the `before` field of the audit event.
+
+### `codeforces_solved_state` seeded on link
+`INSERT IGNORE` seeds a zero row so Job 2 (Phase 3) picks up the user in its next run.
+On unlink the row is deleted; on re-link it is re-seeded (`INSERT IGNORE` is idempotent).
+
+### `/me` codeforces field
+`meResponse()` in `users/router.ts` is now `async`. It calls `cfRepo.findAccountByUserId`;
+if the row is absent or `status = 'UNLINKED'` the field is `null`.
+
+### Rate limit
+`linkLimiter`: 5 req/min (process-local, per §F "link 5/min/user").
+
+## Testing
+```
+npm test                  # unit (rollno parser, permission matrix) — no DB needed
+npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; 32 tests total
+```
+
+### Phase 2 test names (for PROGRESS.md reference)
+```
+linkCfHandle creates an ACTIVE codeforces_accounts row
+linkCfHandle is case-insensitive: Tourist and TOURIST both normalize to tourist
+linkCfHandle seeds a codeforces_solved_state row with zeroed counters
+linkCfHandle writes a cf.link audit row
+linking a handle already owned by ANOTHER user throws HANDLE_TAKEN
+linking the same handle for the SAME user (re-link) succeeds and updates the row
+re-link writes a second cf.link audit row referencing the previous handle
+unlinkCfHandle sets status to UNLINKED and removes solved_state
+unlinkCfHandle writes a cf.unlink audit row
+unlinkCfHandle throws FORBIDDEN when there is no active link
+unlinkCfHandle throws FORBIDDEN when the account is already UNLINKED
+GET /me returns codeforces: null when no link exists
+GET /me returns codeforces handle after linking
+GET /me returns codeforces: null after unlinking
+consumeLinkAttempt with an unknown state returns null (tampered state)
+consumeLinkAttempt with an expired attempt returns null
+consumeLinkAttempt is single-use: second call returns null
+a pre-provisioned user who activates on login can then link a CF handle
+```
+
 ## Gotchas discovered
 - Node's `--experimental-strip-types` rejects TS **parameter properties**
   (`constructor(readonly x: T)`). Use plain field assignments in server code.
