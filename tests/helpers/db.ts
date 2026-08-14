@@ -5,12 +5,46 @@ import { pool } from '../../server/src/db/pool.ts';
 /** Wipe all data between tests, keeping the schema (and the roles seed). */
 export async function resetDb(): Promise<void> {
   await pool.query('SET FOREIGN_KEY_CHECKS = 0');
-  for (const t of ['audit_events', 'user_roles', 'users', 'sessions']) {
+  for (const t of [
+    'audit_events',
+    // Phase 2 CF tables — truncated before user_roles/users so FK constraints don't block.
+    'codeforces_solved_state',
+    'codeforces_link_attempts',
+    'codeforces_accounts',
+    'user_roles',
+    'users',
+    'sessions',
+  ]) {
     await pool.query(`TRUNCATE TABLE ${t}`).catch(() => {
-      /* sessions may not exist until express-mysql-session creates it */
+      /* table may not exist yet (e.g. sessions before first login, or future phases) */
     });
   }
   await pool.query('SET FOREIGN_KEY_CHECKS = 1');
+}
+
+// ---------------------------------------------------------------------------
+// CF-link helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Directly insert a verified CF link row — bypasses OIDC so tests can exercise
+ * downstream behaviour (unlink, /me response, duplicate-handle conflict, etc.).
+ */
+export async function seedCfLink(
+  userId: number,
+  handle: string,
+  normalizedHandle = handle.toLowerCase(),
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO codeforces_accounts
+       (user_id, handle, normalized_handle, verified_at, status)
+     VALUES (?, ?, ?, NOW(), 'ACTIVE')`,
+    [userId, handle, normalizedHandle],
+  );
+  await pool.query(
+    `INSERT IGNORE INTO codeforces_solved_state (user_id) VALUES (?)`,
+    [userId],
+  );
 }
 
 export async function closeDb(): Promise<void> {

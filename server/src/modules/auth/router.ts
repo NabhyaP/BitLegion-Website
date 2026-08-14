@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as client from 'openid-client';
 import { env } from '../../config/env.ts';
 import { destroySession, regenerate } from '../../middleware/session.ts';
+import * as cfRepo from '../codeforces-links/repository.ts';
 import { SignInError, signInWithGoogleClaims } from './service.ts';
 
 const GOOGLE_ISSUER = 'https://accounts.google.com';
@@ -92,8 +93,10 @@ authRouter.get('/google/callback', async (req, res) => {
     req.session.authAt = Date.now();
 
     const returnTo = pending.returnTo?.startsWith('/') ? pending.returnTo : null;
-    // 9. New or unconfirmed users go to onboarding; Phase 2 adds the CF-link check.
-    res.redirect(returnTo ?? (isNew || !user.profileConfirmed ? '/onboarding' : '/dashboard'));
+    // 9. No CF link → /onboarding; otherwise /dashboard. New/unconfirmed also → /onboarding.
+    const cfAccount = await cfRepo.findAccountByUserId(user.id);
+    const hasCfLink = cfAccount !== null && cfAccount.status !== 'UNLINKED';
+    res.redirect(returnTo ?? (isNew || !user.profileConfirmed || !hasCfLink ? '/onboarding' : '/dashboard'));
   } catch (err) {
     if (err instanceof SignInError) return fail(err.reason);
     return fail('oauth-failure');

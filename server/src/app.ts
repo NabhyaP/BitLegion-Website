@@ -11,12 +11,15 @@ import { sessionMiddleware } from './middleware/session.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
 import { authRouter } from './modules/auth/router.ts';
 import { meRouter } from './modules/users/router.ts';
+import { cfLinksRouter } from './modules/codeforces-links/router.ts';
 
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 
 // Process-local buckets (§F). Sufficient for a single Hostinger Node process.
 const authLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true });
 const writeLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true });
+// CF link attempts: 5/min/user (§F "link 5/min/user").
+const linkLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true });
 
 export function createApp() {
   const app = express();
@@ -51,6 +54,7 @@ export function createApp() {
 
   app.use('/api/v1/auth', authLimiter, authRouter);
   app.use('/api/v1/me', writeLimiter, meRouter);
+  app.use('/api/v1/codeforces', linkLimiter, cfLinksRouter);
 
   app.use('/api', (req, res) => {
     res

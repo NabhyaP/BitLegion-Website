@@ -8,8 +8,14 @@ declare module 'express-session' {
     userId?: number;
     /** Epoch ms of the last full authentication — drives the <30 min recent-auth gate (§B1). */
     authAt?: number;
-    /** Transient OIDC handshake state, cleared on completion. */
+    /** Transient Google OIDC handshake state, cleared on completion. */
     oauth?: { state: string; nonce: string; verifier: string; returnTo?: string };
+    /**
+     * Transient CF OIDC handshake state for the link flow (§B2).
+     * Kept separate from `oauth` so the two flows can never be confused.
+     * Cleared on completion (success or failure).
+     */
+    cfOauth?: { state: string; nonce: string; verifier: string };
   }
 }
 
