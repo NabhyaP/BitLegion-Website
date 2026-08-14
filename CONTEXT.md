@@ -53,15 +53,6 @@ code, serial. Course code → branch lives in the **admin-editable `course_codes
 `server/src/modules/users/rollno.ts`; the branch falls back to the email subdomain when no course
 code matches.
 
-## Testing
-```
-npm test                  # unit (rollno parser, permission matrix) — no DB needed
-npm run test:integration   # spins up a throwaway MySQL 8 in Docker on :3307, migrates, runs tests
-```
-The integration script (`tests/run-integration.ps1`) starts container `bitlegion-test-mysql`
-(root/testpw, db `bitlegion_test`) if it isn't already running. **Port 3307, because the owner's
-machine already has a MySQL on 3306** whose credentials we don't have.
-
 ## CF OIDC linking module (Phase 2)
 
 ### Architecture decision: link attempts stored in both session AND DB
@@ -91,11 +82,59 @@ if the row is absent or `status = 'UNLINKED'` the field is `null`.
 ### Rate limit
 `linkLimiter`: 5 req/min (process-local, per §F "link 5/min/user").
 
+## CF server client + Jobs (Phase 3)
+
+### cf-client.ts — serialization design
+`server/src/shared/cf-client.ts` uses a module-level promise chain (`_chain`) so all CF API
+calls in the process — across all jobs — share one queue and honour `CF_MIN_INTERVAL_MS` spacing.
+The module reads `process.env.CF_MIN_INTERVAL_MS` directly (no import of `config/env.ts`) so unit
+tests can import it without triggering the zod env validator.
+
+### lock.ts — MySQL named locks
+`server/src/shared/lock.ts` wraps `GET_LOCK(name, 0)` / `RELEASE_LOCK(name)` with a dedicated
+pool connection per invocation (critical: `GET_LOCK` is session-scoped; reusing a pool connection
+would steal the lock from an unrelated query). Returns `null` immediately if lock is held.
+
+### Job 1 (lb-refresh) — snapshot atomicity
+The critical section is: bulk-insert all entries → single connection transaction that updates
+`leaderboard_versions.status='READY'` and upserts `leaderboard_active.version_id`. A crash before
+that leaves the previous READY version live. A RUNNING version never becomes active.
+
+### Job 1 — bisect on bad handle
+When `cf.userInfo(batch)` throws `CfHandleError`, `bisectBadHandles()` binary-searches the batch
+to isolate the bad handle(s), marks each `NOT_FOUND` in `codeforces_accounts`, and returns
+the good results. One bad handle never fails others.
+
+### Job 2 (solved-sync) — idempotency
+`INSERT IGNORE codeforces_solved_problems` is the idempotency gate. Delta is computed by
+counting pre-existing keys before the bulk insert, so `solved_count` only grows by actually-new
+problems. Running the job twice on the same submissions produces identical counts.
+
+### Migrations renumbering
+Spec §D calls the leaderboard tables "003", solved_problems "004", settings "005". In this repo
+those become 007, 008, 009 because 003–006 were already used for course_codes, profile_confirmed,
+audit_events, and cf_links. Always check the last applied migration before creating a new one.
+
+### Cron schedule (Hostinger)
+```
+0 * * * *    node dist/jobs/refresh-codeforces-leaderboard.js
+0 21 * * *   node dist/jobs/sync-solved-counts.js        # 02:30 IST
+30 22 * * *  node dist/jobs/retain-leaderboard-history.js
+45 22 * * *  node dist/jobs/cleanup-sessions-and-links.js
+```
+If Hostinger Cron can't run arbitrary node commands, use the HTTP trigger fallback:
+`JOB_TRIGGER_SECRET` env var + a protected route (Phase 7 admin panel, §B3.4).
+
 ## Testing
 ```
-npm test                  # unit (rollno parser, permission matrix) — no DB needed
-npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; 32 tests total
+npm test                  # unit — no DB needed; runs rollno/permissions/cf-client tests (~115 s due to real retry delays)
+npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; 49 tests total
 ```
+Unit test count: **32** (10 Phase 1/2 + 22 Phase 3 cf-client).
+Integration test count: **49** expected (32 Phase 1/2 + 17 Phase 3 jobs) — run via `.\tests\run-integration.ps1`.
+
+Note: `npm test` takes ~115 s because two retry tests use real `setTimeout` (5 s + 20 s + 60 s delays).
+This is correct — the retry logic is real, not faked with fake timers.
 
 ### Phase 2 test names (for PROGRESS.md reference)
 ```
@@ -128,3 +167,10 @@ a pre-provisioned user who activates on login can then link a CF handle
   so the runner hangs after the last assertion.
 - The client tsconfig sets `allowImportingTsExtensions` (Vite bundles, nothing is emitted); the
   server instead uses `rewriteRelativeImportExtensions` so `tsc` turns `.ts` imports into `.js`.
+- `shared/cf-client.ts` does NOT import `config/env.ts` — it reads `process.env.CF_MIN_INTERVAL_MS`
+  directly with a numeric fallback. This keeps unit tests runnable without DB env var setup.
+  Jobs that call cf-client always run after env.ts has already validated at process startup.
+- MySQL named locks (`GET_LOCK`) are session-scoped. `lock.ts` always uses a dedicated
+  connection (not a pool connection) so the lock is never accidentally shared or released early.
+- `pruneOldReadyVersions` uses a subquery with an alias (`keep_ids`) to work around MySQL's
+  restriction on deleting from a table while selecting from it in the same query.

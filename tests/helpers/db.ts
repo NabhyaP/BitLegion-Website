@@ -7,6 +7,13 @@ export async function resetDb(): Promise<void> {
   await pool.query('SET FOREIGN_KEY_CHECKS = 0');
   for (const t of [
     'audit_events',
+    // Phase 3 leaderboard tables — truncated first (FK children of leaderboard_versions).
+    'codeforces_rating_daily',
+    'leaderboard_entries',
+    'leaderboard_active',
+    'leaderboard_versions',
+    // Phase 3 solved-problems table.
+    'codeforces_solved_problems',
     // Phase 2 CF tables — truncated before user_roles/users so FK constraints don't block.
     'codeforces_solved_state',
     'codeforces_link_attempts',

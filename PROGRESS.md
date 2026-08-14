@@ -82,5 +82,69 @@ manual staging login, which stays open below.
 - [x] solved_state seeded on link — `linkCfHandle seeds a codeforces_solved_state row with zeroed counters` ✔
 - [ ] Live link succeeds on staging with a real CF account — **owner-blocked** (CF OAuth app)
 
-## Phases 3–8
+## Phase 3 — CF server client + Jobs
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| Migration 007 — `leaderboard_versions`, `leaderboard_entries`, `leaderboard_active`, `codeforces_rating_daily` | DONE | `007_leaderboard.sql`; applied by integration runner |
+| Migration 008 — `codeforces_solved_problems` | DONE | `008_solved_problems.sql`; `codeforces_solved_state` already existed in 006 |
+| Migration 009 — `settings` (with seed defaults) | DONE | `009_settings.sql`; seeds leaderboard_enabled/announcement/leaderboard_refresh_minutes |
+| `shared/cf-client.ts` (§E1) — serialized queue, typed errors, retries, timeout | DONE | Module-level promise chain; CfRateLimitError/CfHandleError/CfUnavailableError; 20 s timeout; 3 retries 5s/20s/60s+jitter; reads process.env directly (no env.ts import) |
+| `shared/lock.ts` — MySQL GET_LOCK/RELEASE_LOCK helper | DONE | Dedicated connection per lock; `withLock(name, fn)` returns null if lock not acquired |
+| `modules/leaderboards/repository.ts` — all leaderboard SQL | DONE | createVersion, bulkInsertEntries, activateVersion, getEntriesForVersion, upsertRatingDaily, pruneOldReadyVersions, pruneRatingDaily, etc. |
+| Job 1 — `jobs/refresh-codeforces-leaderboard.ts` (§E2) | DONE | 14-step flow; bisect on bad handle; stale carry-forward; atomic activation in single transaction; daily rating upsert; job_runs record |
+| Job 2 — `jobs/sync-solved-counts.ts` (§E3) | DONE | Incremental cursor; INSERT IGNORE idempotency; accurate delta via pre-count; rate-limit stops cleanly; job_runs record |
+| Retention job — `jobs/retain-leaderboard-history.ts` (§E4) | DONE | Keeps 3 READY versions; prunes rating_daily 24 months; prunes audit_events 24 months; deletes expired link attempts |
+| Cleanup job — `jobs/cleanup-sessions-and-links.ts` (§E4) | DONE | Deletes expired sessions + link attempts; job_runs record |
+| Unit tests — `shared/cf-client.test.ts` | DONE | 22 new tests; `npm test` → 32/32 (10 prior + 22 new) all pass |
+| Integration tests — `tests/jobs.integration.test.ts` | DONE | 17 tests: atomicity, stale carry-forward, ABANDONED sweep, retention pruning, Job 2 idempotency, bulk insert, daily rating upsert |
+| `tests/helpers/db.ts` — resetDb extended | DONE | Phase 3 tables added: leaderboard_entries, leaderboard_active, leaderboard_versions, codeforces_rating_daily, codeforces_solved_problems |
+| `server/src/app.ts` — health endpoint reports snapshot age | DONE | `getActiveVersionCompletedAt()` called; `activeLeaderboardGeneratedAt` now populated |
+| `shared/contracts/index.ts` — Phase 3/4 types | DONE | LeaderboardEntry, LeaderboardMeta, LeaderboardResponse, PublicSettingsResponse, JobRunSummary |
+| 🔑 Cron wiring on Hostinger | BLOCKED | see HANDOFF.md for exact cron schedule |
+| One real snapshot published on staging with ≥3 real handles | BLOCKED | Needs Hostinger + deployed jobs |
+
+**Phase 3 unit test names (for reference):**
+```
+cf-client — typed errors
+  returns CfUserInfo array on a 200 OK envelope
+  throws CfRateLimitError on HTTP 429 (never retried)
+  throws CfRateLimitError when CF envelope says FAILED with "limit"
+  throws CfHandleError when CF envelope says FAILED with "not found"
+  CfHandleError is never retried
+  throws CfUnavailableError on HTTP 503
+  succeeds if 5xx recovers on the third attempt
+  throws CfUnavailableError on non-retried 4xx (e.g. 400)
+  userStatus attaches handle to CfHandleError
+  userStatus returns CfSubmission array on success
+cf-client — problem key format
+  standard contest submission key is "contestId-index"
+  resubmission of same problem has the same key (idempotency)
+leaderboard sort — tie rules
+  higher rating sorts first
+  equal rating: higher max_rating sorts first
+  equal rating + equal max_rating: alphabetical handle (case-insensitive) sorts first
+  handle comparison is case-insensitive
+  positions are 1-based after sort
+Job 2 — incremental stop condition
+  stops fetching when a submission id ≤ lastSubmissionId is encountered
+  does not stop if the entire page has ids > lastSubmissionId
+Job 2 — solved deduplification
+  re-submitting the same problem produces the same key (INSERT IGNORE is idempotent)
+  Set-based in-run deduplication removes duplicate keys
+  nonstandard problem key uses ps: prefix
+```
+
+**Exit criteria**
+- [x] Unit tests — solved dedupe (resubmissions, nonstandard keys) ✔
+- [x] Unit tests — incremental stop condition ✔
+- [x] Unit tests — tie rules (rating DESC, max_rating DESC, handle ASC) ✔
+- [x] Integration — snapshot atomicity (readers always see a READY version) ✔
+- [x] Integration — stale carry-forward with stale=1 ✔
+- [x] Integration — Job 2 run-twice ⇒ identical counts ✔
+- [x] Integration — ABANDONED sweep for stale RUNNING versions ✔
+- [ ] Rate-limit mid-run stops cleanly (verified by unit logic; full integration with real CF blocked on staging) — **owner-blocked**
+- [ ] One real snapshot published on staging with ≥3 real handles — **owner-blocked** (Hostinger + Cron)
+- [ ] Runbook notes in CONTEXT.md — see CONTEXT.md §Phase 3 section below
+
+## Phases 4–8
 TODO.

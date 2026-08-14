@@ -10,11 +10,14 @@ const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations'
 type Migration = { name: string; up: string[]; down: string[] };
 
 function split(sql: string): string[] {
-  return sql
+  // Strip single-line comments BEFORE splitting on semicolons.
+  // Comments containing semicolons (e.g. "-- foo; bar") would otherwise be
+  // split mid-comment, leaving orphaned text that MySQL rejects.
+  const stripped = sql.replace(/--[^\n]*/g, '');
+  return stripped
     .split(';')
     .map((s) => s.trim())
-    // drop chunks that are only comments/whitespace
-    .filter((s) => s.replace(/--[^\n]*/g, '').trim().length > 0);
+    .filter((s) => s.length > 0);
 }
 
 async function load(): Promise<Migration[]> {

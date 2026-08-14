@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from './config/env.ts';
 import { dbReachable, pool } from './db/pool.ts';
+import { getActiveVersionCompletedAt } from './modules/leaderboards/repository.ts';
 import { requestId } from './middleware/requestId.ts';
 import { sessionMiddleware } from './middleware/session.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
@@ -43,11 +44,20 @@ export function createApp() {
 
   app.get('/api/v1/health', async (_req, res) => {
     const database = (await dbReachable()) ? 'ok' : 'down';
-    // ponytail: snapshot age reported once leaderboard tables exist (Phase 3).
+    // Fetch the active snapshot's completed_at; returns null if no snapshot has been published.
+    let activeLeaderboardGeneratedAt: string | null = null;
+    if (database === 'ok') {
+      try {
+        const ts = await getActiveVersionCompletedAt();
+        activeLeaderboardGeneratedAt = ts ? ts.toISOString() : null;
+      } catch {
+        // Non-fatal: leaderboard tables may not exist yet in a fresh deployment.
+      }
+    }
     res.json({
       status: database === 'ok' ? 'ok' : 'degraded',
       database,
-      activeLeaderboardGeneratedAt: null,
+      activeLeaderboardGeneratedAt,
       version: process.env.GIT_SHA ?? 'dev',
     });
   });
