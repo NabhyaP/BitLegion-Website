@@ -93,6 +93,57 @@ export type PublicSettingsResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// Public profile (Phase 4)
+// ---------------------------------------------------------------------------
+
+export type PublicProfileResponse = {
+  userId: number;
+  displayName: string;
+  handle: string;
+  batch: number | null;
+  branch: string | null;
+  rating: number;
+  maxRating: number;
+  codeforcesRank: string | null;
+  solvedCount: number | null;
+  avatarUrl: string | null;
+  profileUpdatedAt: string; // ISO-8601
+  stale: boolean;
+};
+
+// ---------------------------------------------------------------------------
+// Settings — admin shape (Phase 4)
+// ---------------------------------------------------------------------------
+
+export type AdminSettingsResponse = {
+  announcement: string;
+  leaderboardEnabled: boolean;
+  leaderboardRefreshMinutes: number;
+};
+
+// ---------------------------------------------------------------------------
+// Teams (Phase 4)
+// ---------------------------------------------------------------------------
+
+export type TeamMemberResponse = {
+  id: number;
+  teamId: number;
+  userId: number | null;
+  name: string;
+  roleTitle: string;
+  cfHandle: string | null;
+  photoUrl: string | null;
+  displayOrder: number;
+};
+
+export type TeamResponse = {
+  id: number;
+  name: string;
+  displayOrder: number;
+  members: TeamMemberResponse[];
+};
+
+// ---------------------------------------------------------------------------
 // Job status (Phase 3 / Phase 7 admin panel)
 // ---------------------------------------------------------------------------
 

@@ -280,3 +280,266 @@ export async function pruneRatingDaily(db: Db = defaultPool): Promise<void> {
       WHERE snapshot_date < DATE_SUB(CURDATE(), INTERVAL 24 MONTH)`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — public leaderboard read query (§F leaderboard contract)
+// ---------------------------------------------------------------------------
+
+export type SortField = 'rating' | 'maxRating' | 'solvedCount';
+
+/** Decoded cursor: the sort-key values of the last row on the previous page. */
+export type LeaderboardCursor = {
+  rating: number;
+  maxRating: number;
+  solvedCount: number | null;
+  handle: string;
+};
+
+/** One row returned by queryLeaderboard (before contract mapping). */
+export type LeaderboardRow = {
+  userId: number;
+  displayName: string;
+  handle: string;
+  batch: number | null;
+  branch: string | null;
+  rating: number;
+  maxRating: number;
+  codeforcesRank: string | null;
+  ratingChange30d: number | null;
+  solvedCount: number | null;
+  avatarUrl: string | null;
+  profileUpdatedAt: Date;
+  stale: boolean;
+};
+
+export type QueryLeaderboardOptions = {
+  versionId: number;
+  sort: SortField;
+  batch?: number | null;
+  branch?: string | null;
+  q?: string | null;
+  limit: number;
+  cursor?: LeaderboardCursor | null;
+};
+
+/**
+ * Paginated leaderboard query with keyset cursor.
+ *
+ * Returns `limit + 1` rows so the caller can tell whether a next page exists.
+ * Reads are filtered at query time by users.show_in_leaderboard = 1 AND users.status = 'ACTIVE'
+ * (§0.4.3 — hide filter is instant without republishing the snapshot).
+ *
+ * ratingChange30d: rating today − rating ~30 days ago from codeforces_rating_daily.
+ */
+export async function queryLeaderboard(
+  opts: QueryLeaderboardOptions,
+  db: Db = defaultPool,
+): Promise<LeaderboardRow[]> {
+  const { versionId, sort, batch, branch, q, limit, cursor } = opts;
+
+  // Build ORDER BY and cursor predicate based on sort field.
+  // For solvedCount NULL rows come last (NULLS LAST semantics via ISNULL trick).
+  let orderBy: string;
+  let cursorWhere = '';
+  const params: unknown[] = [versionId];
+
+  if (sort === 'rating') {
+    orderBy = 'le.rating DESC, le.max_rating DESC, le.handle ASC';
+    if (cursor) {
+      cursorWhere = `AND (le.rating < ? OR (le.rating = ? AND le.max_rating < ?) OR (le.rating = ? AND le.max_rating = ? AND le.handle > ?))`;
+      params.push(cursor.rating, cursor.rating, cursor.maxRating, cursor.rating, cursor.maxRating, cursor.handle);
+    }
+  } else if (sort === 'maxRating') {
+    orderBy = 'le.max_rating DESC, le.rating DESC, le.handle ASC';
+    if (cursor) {
+      cursorWhere = `AND (le.max_rating < ? OR (le.max_rating = ? AND le.rating < ?) OR (le.max_rating = ? AND le.rating = ? AND le.handle > ?))`;
+      params.push(cursor.maxRating, cursor.maxRating, cursor.rating, cursor.maxRating, cursor.rating, cursor.handle);
+    }
+  } else {
+    // solvedCount — NULL last; within solved rows desc by solved_count then rating then handle
+    orderBy = 'ISNULL(le.solved_count) ASC, le.solved_count DESC, le.rating DESC, le.handle ASC';
+    if (cursor) {
+      if (cursor.solvedCount === null) {
+        // previous page ended in NULL solved_count rows; cursor by handle only
+        cursorWhere = `AND (ISNULL(le.solved_count) = 1 AND le.handle > ?)`;
+        params.push(cursor.handle);
+      } else {
+        cursorWhere = `AND (ISNULL(le.solved_count) = 1 OR (le.solved_count < ?) OR (le.solved_count = ? AND le.rating < ?) OR (le.solved_count = ? AND le.rating = ? AND le.handle > ?))`;
+        params.push(cursor.solvedCount, cursor.solvedCount, cursor.rating, cursor.solvedCount, cursor.rating, cursor.handle);
+      }
+    }
+  }
+
+  // Batch / branch / search filters
+  if (batch != null) {
+    params.push(batch);
+  }
+  if (branch != null) {
+    params.push(branch.toUpperCase());
+  }
+  if (q) {
+    const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+    params.push(like, like);
+  }
+
+  // Limit (+1 to detect next page)
+  params.push(limit + 1);
+
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT
+       le.user_id,
+       u.display_name,
+       le.handle,
+       u.batch_year,
+       u.branch,
+       le.rating,
+       le.max_rating,
+       le.cf_rank,
+       le.solved_count,
+       le.avatar_url,
+       le.profile_updated_at,
+       le.stale,
+       (
+         SELECT today.rating - past.rating
+           FROM codeforces_rating_daily today
+           JOIN codeforces_rating_daily past
+             ON past.user_id = le.user_id
+            AND past.snapshot_date = (
+                  SELECT MAX(d2.snapshot_date)
+                    FROM codeforces_rating_daily d2
+                   WHERE d2.user_id = le.user_id
+                     AND d2.snapshot_date <= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                )
+          WHERE today.user_id = le.user_id
+            AND today.snapshot_date = CURDATE()
+          LIMIT 1
+       ) AS rating_change_30d
+     FROM leaderboard_entries le
+     JOIN leaderboard_active la ON la.version_id = le.version_id
+     JOIN users u ON u.id = le.user_id
+     WHERE le.version_id = ?
+       AND u.show_in_leaderboard = 1
+       AND u.status = 'ACTIVE'
+       ${cursorWhere}
+       ${batch != null ? 'AND u.batch_year = ?' : ''}
+       ${branch != null ? 'AND u.branch = ?' : ''}
+       ${q ? 'AND (u.display_name LIKE ? OR le.handle LIKE ?)' : ''}
+     ORDER BY ${orderBy}
+     LIMIT ?`,
+    params,
+  );
+
+  return rows.map((r) => ({
+    userId: Number(r.user_id),
+    displayName: r.display_name as string,
+    handle: r.handle as string,
+    batch: r.batch_year != null ? Number(r.batch_year) : null,
+    branch: (r.branch as string | null) ?? null,
+    rating: Number(r.rating),
+    maxRating: Number(r.max_rating),
+    codeforcesRank: (r.cf_rank as string | null) ?? null,
+    ratingChange30d: r.rating_change_30d != null ? Number(r.rating_change_30d) : null,
+    solvedCount: r.solved_count != null ? Number(r.solved_count) : null,
+    avatarUrl: (r.avatar_url as string | null) ?? null,
+    profileUpdatedAt: new Date(r.profile_updated_at),
+    stale: Boolean(r.stale),
+  }));
+}
+
+/** Fetch the active version's metadata (id + completedAt + generatedAt) for meta response. */
+export async function getActiveVersionMeta(
+  db: Db = defaultPool,
+): Promise<{ versionId: number; completedAt: Date } | null> {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT la.version_id, v.completed_at
+       FROM leaderboard_active la
+       JOIN leaderboard_versions v ON v.id = la.version_id
+      WHERE la.id = 1`,
+  );
+  if (!rows[0]) return null;
+  return {
+    versionId: Number(rows[0].version_id),
+    completedAt: new Date(rows[0].completed_at),
+  };
+}
+
+/** Look up a single leaderboard entry by normalized handle in the active snapshot. */
+export async function getActiveEntryByHandle(
+  normalizedHandle: string,
+  db: Db = defaultPool,
+): Promise<(LeaderboardRow & { versionId: number }) | null> {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT
+       le.version_id,
+       le.user_id,
+       u.display_name,
+       le.handle,
+       u.batch_year,
+       u.branch,
+       le.rating,
+       le.max_rating,
+       le.cf_rank,
+       le.solved_count,
+       le.avatar_url,
+       le.profile_updated_at,
+       le.stale
+     FROM leaderboard_entries le
+     JOIN leaderboard_active la ON la.version_id = le.version_id
+     JOIN users u ON u.id = le.user_id
+     JOIN codeforces_accounts ca ON ca.user_id = le.user_id
+     WHERE ca.normalized_handle = ?
+       AND le.version_id = la.version_id
+     LIMIT 1`,
+    [normalizedHandle],
+  );
+  if (!rows[0]) return null;
+  const r = rows[0];
+  return {
+    versionId: Number(r.version_id),
+    userId: Number(r.user_id),
+    displayName: r.display_name as string,
+    handle: r.handle as string,
+    batch: r.batch_year != null ? Number(r.batch_year) : null,
+    branch: (r.branch as string | null) ?? null,
+    rating: Number(r.rating),
+    maxRating: Number(r.max_rating),
+    codeforcesRank: (r.cf_rank as string | null) ?? null,
+    ratingChange30d: null,
+    solvedCount: r.solved_count != null ? Number(r.solved_count) : null,
+    avatarUrl: (r.avatar_url as string | null) ?? null,
+    profileUpdatedAt: new Date(r.profile_updated_at),
+    stale: Boolean(r.stale),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cursor encode / decode helpers
+// ---------------------------------------------------------------------------
+
+export function encodeCursor(c: LeaderboardCursor): string {
+  return Buffer.from(JSON.stringify(c)).toString('base64url');
+}
+
+export function decodeCursor(token: string): LeaderboardCursor | null {
+  try {
+    const raw = JSON.parse(Buffer.from(token, 'base64url').toString('utf8')) as unknown;
+    if (
+      typeof raw !== 'object' ||
+      raw === null ||
+      typeof (raw as Record<string, unknown>).rating !== 'number' ||
+      typeof (raw as Record<string, unknown>).maxRating !== 'number' ||
+      typeof (raw as Record<string, unknown>).handle !== 'string'
+    ) {
+      return null;
+    }
+    const obj = raw as Record<string, unknown>;
+    return {
+      rating: obj.rating as number,
+      maxRating: obj.maxRating as number,
+      solvedCount: obj.solvedCount != null ? (obj.solvedCount as number) : null,
+      handle: obj.handle as string,
+    };
+  } catch {
+    return null;
+  }
+}

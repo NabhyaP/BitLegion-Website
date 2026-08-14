@@ -113,7 +113,8 @@ problems. Running the job twice on the same submissions produces identical count
 ### Migrations renumbering
 Spec §D calls the leaderboard tables "003", solved_problems "004", settings "005". In this repo
 those become 007, 008, 009 because 003–006 were already used for course_codes, profile_confirmed,
-audit_events, and cf_links. Always check the last applied migration before creating a new one.
+audit_events, and cf_links. Spec §D migration 006 (club_teams) becomes 010 here. Always check the
+last applied migration before creating a new one.
 
 ### Cron schedule (Hostinger)
 ```
@@ -125,13 +126,54 @@ audit_events, and cf_links. Always check the last applied migration before creat
 If Hostinger Cron can't run arbitrary node commands, use the HTTP trigger fallback:
 `JOB_TRIGGER_SECRET` env var + a protected route (Phase 7 admin panel, §B3.4).
 
+## Leaderboard read API (Phase 4)
+
+### Cursor pagination design
+Keyset cursor encoding: `base64url(JSON({rating, maxRating, solvedCount, handle}))`. Sort-specific
+`WHERE` clause continues after the last row of the previous page. The cursor is opaque to clients.
+`limit+1` rows are fetched to detect whether a next page exists without a separate COUNT query.
+
+### ratingChange30d computation
+Computed per-row via correlated subquery joining `codeforces_rating_daily` today vs the nearest
+snapshot ≤ 30 days ago. Acceptable at ~1,000 users. If staging EXPLAIN shows full scan, consider
+precomputing in the nightly job or caching in a `ratingChange30d` column on `leaderboard_entries`.
+**Record the EXPLAIN output here once the staging load test is done.**
+
+### Disabled / previewOnly logic
+`leaderboard_enabled = 'false'` in the `settings` table → public callers get `{disabled: true}`;
+admin callers get full data with `meta.previewOnly = true`. The setting is read on every request
+(no cache) so toggling takes effect immediately. The 60-second in-process cache is only for the
+active snapshot metadata (snapshotId, completedAt) — not for the enabled flag.
+
+### ETag design
+`"{snapshotId}:{sha1(queryParams)[0:12]}"`. Stable for the lifetime of a snapshot (~refresh
+interval). Different filter/sort combos get different ETags. Set `Cache-Control: public, max-age=60`.
+
+### Hide-user instant effect
+`show_in_leaderboard = 0` is applied at **read time** via the SQL JOIN on `users` — no snapshot
+republish needed. This satisfies §B3.1 "applied at snapshot READ time, so instant".
+
+### Teams CRUD audit trail
+Every admin mutation (team create/update/delete, member create/update/delete) calls `audit.record`
+in the same transaction. Action codes: `team.create`, `team.update`, `team.delete`,
+`team.member.create`, `team.member.update`, `team.member.delete`.
+
+### Settings audit trail
+`settings.update` audit event written on every PATCH, with `before` = full previous state and
+`after` = the patch payload.
+
+### Public profile — 404-not-403
+`GET /api/v1/profiles/:handle` returns 404 for: unknown handle, hidden user
+(`show_in_leaderboard = 0`), suspended user, no active snapshot. Never 403 — this prevents
+enumeration of which users exist but are hidden (§G).
+
 ## Testing
 ```
 npm test                  # unit — no DB needed; runs rollno/permissions/cf-client tests (~115 s due to real retry delays)
-npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; 49 tests total
+npm run test:integration   # spins up / reuses bitlegion-test-mysql on :3307; all integration tests
 ```
 Unit test count: **32** (10 Phase 1/2 + 22 Phase 3 cf-client).
-Integration test count: **49** expected (32 Phase 1/2 + 17 Phase 3 jobs) — run via `.\tests\run-integration.ps1`.
+Integration test count: **83** expected (32 Phase 1/2 + 17 Phase 3 jobs + 34 Phase 4) — run via `.\tests\run-integration.ps1`.
 
 Note: `npm test` takes ~115 s because two retry tests use real `setTimeout` (5 s + 20 s + 60 s delays).
 This is correct — the retry logic is real, not faked with fake timers.

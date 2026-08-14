@@ -1,4 +1,10 @@
-import 'dotenv/config';
+import { config } from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Load .env from the monorepo root (two levels up from server/src/config/)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(__dirname, '../../../.env') });
 import { z } from 'zod';
 
 // ponytail: one flat schema, no per-module env slices. Split when a module needs isolation.

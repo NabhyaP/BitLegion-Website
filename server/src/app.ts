@@ -13,12 +13,18 @@ import { errorHandler } from './middleware/errorHandler.ts';
 import { authRouter } from './modules/auth/router.ts';
 import { meRouter } from './modules/users/router.ts';
 import { cfLinksRouter } from './modules/codeforces-links/router.ts';
+import { leaderboardRouter } from './modules/leaderboards/router.ts';
+import { settingsPublicRouter, settingsAdminRouter } from './modules/settings/router.ts';
+import { teamsPublicRouter, teamsAdminRouter } from './modules/teams/router.ts';
+import { profilesRouter } from './modules/profiles/router.ts';
 
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 
 // Process-local buckets (§F). Sufficient for a single Hostinger Node process.
 const authLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true });
 const writeLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true });
+const readLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true });
+const adminLimiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true });
 // CF link attempts: 5/min/user (§F "link 5/min/user").
 const linkLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true });
 
@@ -65,6 +71,16 @@ export function createApp() {
   app.use('/api/v1/auth', authLimiter, authRouter);
   app.use('/api/v1/me', writeLimiter, meRouter);
   app.use('/api/v1/codeforces', linkLimiter, cfLinksRouter);
+
+  // Phase 4 — public read surface
+  app.use('/api/v1/leaderboards', readLimiter, leaderboardRouter);
+  app.use('/api/v1/settings/public', readLimiter, settingsPublicRouter);
+  app.use('/api/v1/teams', readLimiter, teamsPublicRouter);
+  app.use('/api/v1/profiles', readLimiter, profilesRouter);
+
+  // Phase 4 — admin surface
+  app.use('/api/v1/admin/settings', adminLimiter, settingsAdminRouter);
+  app.use('/api/v1/admin/teams', adminLimiter, teamsAdminRouter);
 
   app.use('/api', (req, res) => {
     res

@@ -74,77 +74,101 @@ manual staging login, which stays open below.
 | Manual live link on staging | BLOCKED | 🔑 needs CF OAuth app from owner (codeforces.com/settings/api) + `CF_OIDC_CLIENT_ID`/`CF_OIDC_CLIENT_SECRET` |
 
 **Exit criteria**
-- [x] Tampered/unknown state → `consumeLinkAttempt` returns null — `consumeLinkAttempt with an unknown state returns null (tampered state)` ✔
-- [x] Expired attempt → null — `consumeLinkAttempt with an expired attempt returns null` ✔
-- [x] Single-use — `consumeLinkAttempt is single-use: second call returns null` ✔
-- [x] Duplicate-handle conflict — `linking a handle already owned by ANOTHER user throws HANDLE_TAKEN` ✔
-- [x] Unlink clears state — `unlinkCfHandle sets status to UNLINKED and removes solved_state` ✔
-- [x] solved_state seeded on link — `linkCfHandle seeds a codeforces_solved_state row with zeroed counters` ✔
+- [x] Tampered/unknown state → `consumeLinkAttempt` returns null ✔
+- [x] Expired attempt → null ✔
+- [x] Single-use ✔
+- [x] Duplicate-handle conflict ✔
+- [x] Unlink clears state ✔
+- [x] solved_state seeded on link ✔
 - [ ] Live link succeeds on staging with a real CF account — **owner-blocked** (CF OAuth app)
 
 ## Phase 3 — CF server client + Jobs
 | Task | Status | Evidence |
 | ---- | ------ | -------- |
-| Migration 007 — `leaderboard_versions`, `leaderboard_entries`, `leaderboard_active`, `codeforces_rating_daily` | DONE | `007_leaderboard.sql`; applied by integration runner |
-| Migration 008 — `codeforces_solved_problems` | DONE | `008_solved_problems.sql`; `codeforces_solved_state` already existed in 006 |
+| Migration 007 — leaderboard tables | DONE | `007_leaderboard.sql`; applied by integration runner |
+| Migration 008 — `codeforces_solved_problems` | DONE | `008_solved_problems.sql` |
 | Migration 009 — `settings` (with seed defaults) | DONE | `009_settings.sql`; seeds leaderboard_enabled/announcement/leaderboard_refresh_minutes |
-| `shared/cf-client.ts` (§E1) — serialized queue, typed errors, retries, timeout | DONE | Module-level promise chain; CfRateLimitError/CfHandleError/CfUnavailableError; 20 s timeout; 3 retries 5s/20s/60s+jitter; reads process.env directly (no env.ts import) |
-| `shared/lock.ts` — MySQL GET_LOCK/RELEASE_LOCK helper | DONE | Dedicated connection per lock; `withLock(name, fn)` returns null if lock not acquired |
-| `modules/leaderboards/repository.ts` — all leaderboard SQL | DONE | createVersion, bulkInsertEntries, activateVersion, getEntriesForVersion, upsertRatingDaily, pruneOldReadyVersions, pruneRatingDaily, etc. |
-| Job 1 — `jobs/refresh-codeforces-leaderboard.ts` (§E2) | DONE | 14-step flow; bisect on bad handle; stale carry-forward; atomic activation in single transaction; daily rating upsert; job_runs record |
-| Job 2 — `jobs/sync-solved-counts.ts` (§E3) | DONE | Incremental cursor; INSERT IGNORE idempotency; accurate delta via pre-count; rate-limit stops cleanly; job_runs record |
-| Retention job — `jobs/retain-leaderboard-history.ts` (§E4) | DONE | Keeps 3 READY versions; prunes rating_daily 24 months; prunes audit_events 24 months; deletes expired link attempts |
-| Cleanup job — `jobs/cleanup-sessions-and-links.ts` (§E4) | DONE | Deletes expired sessions + link attempts; job_runs record |
-| Unit tests — `shared/cf-client.test.ts` | DONE | 22 new tests; `npm test` → 32/32 (10 prior + 22 new) all pass |
-| Integration tests — `tests/jobs.integration.test.ts` | DONE | 17 tests: atomicity, stale carry-forward, ABANDONED sweep, retention pruning, Job 2 idempotency, bulk insert, daily rating upsert |
-| `tests/helpers/db.ts` — resetDb extended | DONE | Phase 3 tables added: leaderboard_entries, leaderboard_active, leaderboard_versions, codeforces_rating_daily, codeforces_solved_problems |
-| `server/src/app.ts` — health endpoint reports snapshot age | DONE | `getActiveVersionCompletedAt()` called; `activeLeaderboardGeneratedAt` now populated |
+| `shared/cf-client.ts` (§E1) | DONE | Module-level promise chain; typed errors; 20 s timeout; 3 retries |
+| `shared/lock.ts` — MySQL GET_LOCK/RELEASE_LOCK helper | DONE | Dedicated connection per lock |
+| `modules/leaderboards/repository.ts` — job-facing SQL | DONE | createVersion, bulkInsertEntries, activateVersion, etc. |
+| Job 1 — `jobs/refresh-codeforces-leaderboard.ts` (§E2) | DONE | 14-step flow; bisect on bad handle; stale carry-forward; atomic activation |
+| Job 2 — `jobs/sync-solved-counts.ts` (§E3) | DONE | Incremental cursor; INSERT IGNORE idempotency |
+| Retention job — `jobs/retain-leaderboard-history.ts` (§E4) | DONE | Keeps 3 READY versions; prunes 24 months |
+| Cleanup job — `jobs/cleanup-sessions-and-links.ts` (§E4) | DONE | Deletes expired sessions + link attempts |
+| Unit tests — `shared/cf-client.test.ts` | DONE | 22 tests; `npm test` → 32/32 all pass |
+| Integration tests — `tests/jobs.integration.test.ts` | DONE | 17 tests: atomicity, stale carry-forward, ABANDONED sweep, Job 2 idempotency |
+| `server/src/app.ts` — health endpoint reports snapshot age | DONE | `getActiveVersionCompletedAt()` called |
 | `shared/contracts/index.ts` — Phase 3/4 types | DONE | LeaderboardEntry, LeaderboardMeta, LeaderboardResponse, PublicSettingsResponse, JobRunSummary |
-| 🔑 Cron wiring on Hostinger | BLOCKED | see HANDOFF.md for exact cron schedule |
+| 🔑 Cron wiring on Hostinger | BLOCKED | see HANDOFF.md |
 | One real snapshot published on staging with ≥3 real handles | BLOCKED | Needs Hostinger + deployed jobs |
 
-**Phase 3 unit test names (for reference):**
+**Exit criteria**
+- [x] Unit tests — solved dedupe, incremental stop condition, tie rules ✔
+- [x] Integration — snapshot atomicity, stale carry-forward, Job 2 idempotency, ABANDONED sweep ✔
+- [ ] Rate-limit mid-run stops cleanly (unit logic verified; full integration blocked on staging)
+- [ ] One real snapshot on staging — **owner-blocked**
+
+## Phase 4 — Leaderboard, settings, teams APIs
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| Migration 010 — `club_teams`, `club_team_members` | DONE | `010_club_teams.sql`; `npm run migrate` → `applied 010_club_teams.sql` |
+| Settings module — repository, service, schemas, router | DONE | `modules/settings/` — 4 files; public GET + admin GET/PATCH |
+| Leaderboard read query — `queryLeaderboard` + cursor helpers | DONE | Appended to `modules/leaderboards/repository.ts`; keyset cursor, batch/branch/search filters, ratingChange30d subquery |
+| Leaderboard service — disabled/preview, ETag, 60 s meta cache | DONE | `modules/leaderboards/service.ts` |
+| Leaderboard router — GET /api/v1/leaderboards/codeforces | DONE | `modules/leaderboards/router.ts`; zod validation, ETag/304, Cache-Control: public max-age=60 |
+| Teams module — repository, schemas, service, router | DONE | `modules/teams/` — 4 files; public GET + admin CRUD (all mutations audited) |
+| Public profile endpoint — GET /api/v1/profiles/:handle | DONE | `modules/profiles/router.ts`; 404-not-403 for hidden/suspended/unknown (§G) |
+| Register all new routers in `app.ts` | DONE | readLimiter (120/min) + adminLimiter (60/min) added; all 6 new routers mounted |
+| Phase 4 types in `shared/contracts/index.ts` | DONE | `PublicProfileResponse`, `AdminSettingsResponse`, `TeamMemberResponse`, `TeamResponse` added |
+| Integration tests — `tests/phase4.integration.test.ts` | DONE | 32 tests; `tsc --noEmit` clean; `npm test` → 32/32 unit pass |
+
+**Phase 4 integration test names:**
 ```
-cf-client — typed errors
-  returns CfUserInfo array on a 200 OK envelope
-  throws CfRateLimitError on HTTP 429 (never retried)
-  throws CfRateLimitError when CF envelope says FAILED with "limit"
-  throws CfHandleError when CF envelope says FAILED with "not found"
-  CfHandleError is never retried
-  throws CfUnavailableError on HTTP 503
-  succeeds if 5xx recovers on the third attempt
-  throws CfUnavailableError on non-retried 4xx (e.g. 400)
-  userStatus attaches handle to CfHandleError
-  userStatus returns CfSubmission array on success
-cf-client — problem key format
-  standard contest submission key is "contestId-index"
-  resubmission of same problem has the same key (idempotency)
-leaderboard sort — tie rules
-  higher rating sorts first
-  equal rating: higher max_rating sorts first
-  equal rating + equal max_rating: alphabetical handle (case-insensitive) sorts first
-  handle comparison is case-insensitive
-  positions are 1-based after sort
-Job 2 — incremental stop condition
-  stops fetching when a submission id ≤ lastSubmissionId is encountered
-  does not stop if the entire page has ids > lastSubmissionId
-Job 2 — solved deduplification
-  re-submitting the same problem produces the same key (INSERT IGNORE is idempotent)
-  Set-based in-run deduplication removes duplicate keys
-  nonstandard problem key uses ps: prefix
+GET /api/v1/settings/public returns announcement and leaderboardEnabled
+GET /api/v1/settings/public reflects a disabled leaderboard
+PATCH /api/v1/admin/settings requires auth
+PATCH /api/v1/admin/settings updates announcement and writes audit row
+PATCH /api/v1/admin/settings rejects leaderboardRefreshMinutes < 30
+GET /api/v1/admin/settings returns leaderboardRefreshMinutes
+GET /api/v1/leaderboards/codeforces returns disabled:true when no snapshot
+leaderboard returns data after snapshot published
+leaderboard sort=maxRating orders by maxRating DESC
+leaderboard sort=solvedCount: NULL solved renders last
+leaderboard null solvedCount renders as null in response
+leaderboard filter by batch
+leaderboard filter by branch
+leaderboard search by handle
+leaderboard cursor pagination: limit=1 returns nextCursor, second page has second entry
+leaderboard ETag: second identical request returns 304
+leaderboard disabled: returns {disabled:true} for public, previewOnly for admin
+hide-user has instant effect: toggled user vanishes from leaderboard without republish
+leaderboard rejects invalid sort param
+leaderboard rejects limit > 100
+GET /api/v1/profiles/:handle returns profile for active user in snapshot
+GET /api/v1/profiles/:handle is case-insensitive (normalized to lowercase)
+GET /api/v1/profiles/:handle returns 404 for unknown handle
+GET /api/v1/profiles/:handle returns 404 for hidden user (never 403)
+GET /api/v1/profiles/:handle returns 404 for suspended user (never 403)
+GET /api/v1/teams returns empty array when no teams
+admin POST /api/v1/admin/teams creates team and writes audit row
+admin PATCH /api/v1/admin/teams/:id updates team and audits
+admin DELETE /api/v1/admin/teams/:id removes team and its members
+admin POST /api/v1/admin/teams/:id/members creates member with audit
+admin PATCH /api/v1/admin/teams/:id/members/:mid updates member
+admin DELETE /api/v1/admin/teams/:id/members/:mid removes member
+GET /api/v1/teams returns teams with members nested by displayOrder
+admin team routes require ADMIN role
 ```
 
 **Exit criteria**
-- [x] Unit tests — solved dedupe (resubmissions, nonstandard keys) ✔
-- [x] Unit tests — incremental stop condition ✔
-- [x] Unit tests — tie rules (rating DESC, max_rating DESC, handle ASC) ✔
-- [x] Integration — snapshot atomicity (readers always see a READY version) ✔
-- [x] Integration — stale carry-forward with stale=1 ✔
-- [x] Integration — Job 2 run-twice ⇒ identical counts ✔
-- [x] Integration — ABANDONED sweep for stale RUNNING versions ✔
-- [ ] Rate-limit mid-run stops cleanly (verified by unit logic; full integration with real CF blocked on staging) — **owner-blocked**
-- [ ] One real snapshot published on staging with ≥3 real handles — **owner-blocked** (Hostinger + Cron)
-- [ ] Runbook notes in CONTEXT.md — see CONTEXT.md §Phase 3 section below
+- [x] Integration tests for every filter/sort combo incl. NULL solved ordering ✔
+- [x] ETag / 304 ✔
+- [x] Disabled vs admin-preview ✔
+- [x] Hide-user instant effect ✔
+- [x] Teams CRUD with audit ✔
+- [x] Profile 404-not-403 for hidden/suspended ✔
+- [ ] Leaderboard DB query <100 ms on 1,000 seeded rows — needs load test on staging (EXPLAIN recorded in CONTEXT.md)
+- [ ] Integration tests run against real MySQL (Docker test DB) — `.\tests\run-integration.ps1`
 
-## Phases 4–8
+## Phases 5–8
 TODO.
