@@ -24,6 +24,9 @@ export type CfLinkInfo = {
   handle: string;
   status: CfLinkStatus;
   verifiedAt: string; // ISO-8601 UTC
+  // solved-state summary (spec §F "/me" contract)
+  solvedCount: number | null;
+  lastSyncedAt: string | null; // ISO-8601 UTC, null if Job 2 hasn't run yet
 } | null;
 
 // ---------------------------------------------------------------------------
@@ -157,4 +160,70 @@ export type JobRunSummary = {
   finishedAt: string | null;
   durationMs: number | null;
   detail: Record<string, unknown> | null;
+};
+
+// ---------------------------------------------------------------------------
+// Admin contracts (Phase 7)
+// ---------------------------------------------------------------------------
+
+export type AdminMemberResponse = {
+  id: number;
+  collegeEmail: string;
+  displayName: string;
+  rollNo: string | null;
+  batchYear: number | null;
+  branch: string | null;
+  status: 'ACTIVE' | 'PENDING' | 'SUSPENDED' | 'ALUMNI';
+  showInLeaderboard: boolean;
+  avatarUrl: string | null;
+  profileConfirmed: boolean;
+  cfHandle: string | null;
+  cfStatus: string | null;
+  roles: string[];
+};
+
+export type AdminMembersPageResponse = {
+  data: AdminMemberResponse[];
+  meta: { total: number; page: number; pageSize: number; pages: number };
+};
+
+export type CsvImportResult = {
+  imported: number;
+  skipped: number;
+  errors: Array<{ row: number; email: string; reason: string }>;
+};
+
+export type HandleIssueResponse = {
+  userId: number;
+  displayName: string;
+  handle: string;
+  cfStatus: string;
+  lastCheckedAt: string | null;
+};
+
+export type AuditEventResponse = {
+  id: number;
+  actorUserId: number;
+  actorName: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  beforeJson: unknown;
+  afterJson: unknown;
+  requestId: string | null;
+  createdAt: string;
+};
+
+export type AuditEventsPageResponse = {
+  data: AuditEventResponse[];
+  meta: { total: number; page: number; pageSize: number; pages: number };
+};
+
+export type AdminStatsResponse = {
+  totalUsers: number;
+  activeUsers: number;
+  linkedUsers: number;
+  pendingUsers: number;
+  suspendedUsers: number;
+  signupsLast7d: Array<{ date: string; count: number }>;
 };

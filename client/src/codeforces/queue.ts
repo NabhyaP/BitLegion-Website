@@ -107,7 +107,8 @@ export async function tryBecomeLeader(): Promise<boolean> {
 
   if (_tabRole === 'leader') return true;
 
-  return new Promise<boolean>((resolve) => {
+  // First try: grab immediately with ifAvailable (non-blocking)
+  const gotIt = await new Promise<boolean>((resolve) => {
     _lockController = new AbortController();
     navigator.locks.request(
       LOCK_NAME,
@@ -116,9 +117,8 @@ export async function tryBecomeLeader(): Promise<boolean> {
         if (lock) {
           _tabRole = 'leader';
           resolve(true);
-          // Hold lock until releaseLeader() aborts
           return new Promise<void>((res) => {
-            _lockController!.signal.addEventListener('abort', res);
+            _lockController!.signal.addEventListener('abort', () => res());
           });
         } else {
           resolve(false);
@@ -126,6 +126,40 @@ export async function tryBecomeLeader(): Promise<boolean> {
         }
       },
     ).catch(() => resolve(false));
+  });
+
+  if (gotIt) return true;
+
+  // Second try: wait up to 4 seconds for the lock to become free.
+  // This handles stale locks from crashed/closed tabs — browsers release
+  // Web Locks automatically when the tab that held them closes, but the
+  // Promise above won't see that. A brief wait covers the release window.
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const timeout = setTimeout(() => {
+      if (!done) { done = true; resolve(false); }
+    }, 4_000);
+
+    const ac = new AbortController();
+    _lockController = ac;
+
+    navigator.locks.request(
+      LOCK_NAME,
+      { signal: ac.signal },  // blocking request — waits for lock
+      (lock) => {
+        if (!done) {
+          done = true;
+          clearTimeout(timeout);
+          _tabRole = 'leader';
+          resolve(true);
+        }
+        return new Promise<void>((res) => {
+          ac.signal.addEventListener('abort', () => res());
+        });
+      },
+    ).catch(() => {
+      if (!done) { done = true; clearTimeout(timeout); resolve(false); }
+    });
   });
 }
 

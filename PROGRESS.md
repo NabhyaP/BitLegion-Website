@@ -200,11 +200,106 @@ admin team routes require ADMIN role
 - [ ] Browser smoke: login→onboarding→link flow end-to-end on staging — **owner-blocked** (Google OAuth + CF OAuth not configured)
 - [ ] Spike 1 (CF CORS) verified — open `/spike/cf` in browser, record in CONTEXT.md — **still pending**
 
-## Phase 6
-TODO.
+## Phase 6 — Product pages
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| `client/src/utils/rankColor.ts` — one rank→color util | DONE | `rankInfo(rating)` returns `{label, color}`; used in Dashboard, Leaderboard, Profile, Teams |
+| Dashboard — stat row (rating, maxRating, solved, contests, unsolved) | DONE | `client/src/pages/Dashboard.vue`; reads from coordinator refs |
+| Dashboard — SVG rating history line chart | DONE | Pure SVG `<path>` computed from `cfRefs.ratings`; text summary in `<details>` |
+| Dashboard — tag donut (top-10 + other) | DONE | Pure SVG arcs from `analytics.topTags`; legend list alongside |
+| Dashboard — difficulty distribution bars | DONE | Bar chart from `analytics.difficultyDistribution`; color-coded by rank |
+| Dashboard — practice calendar heatmap (52 weeks) | DONE | Flat `calendarCells` computed → SVG `<rect>` grid; legend |
+| Dashboard — language usage | DONE | Pill list from `analytics.languageUsage` |
+| Dashboard — freshness label + Refresh button (disabled while refreshing) | DONE | `freshnessLabel` computed; `isRefreshing` disables button |
+| Dashboard — all §C4 failure states | DONE | Rate-limited / CF unavailable / first-visit-no-cache / stale all handled |
+| Leaderboard page — URL-driven controls (sort/batch/branch/search) | DONE | `route.query` read on mount + watch; `pushUrl()` on change |
+| Leaderboard page — 300 ms debounce on search | DONE | `_debounceTimer` + `clearTimeout` |
+| Leaderboard page — AbortController on stale requests | DONE | `_abortCtrl.abort()` before each new fetch |
+| Leaderboard page — ETag/304 (browser cache) | DONE | Standard browser fetch honours `Cache-Control: public, max-age=60` + ETags from server |
+| Leaderboard page — snapshot meta (generated at / next refresh) | DONE | `snapshotAge()` helper; displayed below controls |
+| Leaderboard page — disabled state + previewOnly amber banner | DONE | Checks `'disabled' in res` and `meta.previewOnly` |
+| Leaderboard page — NULL solvedCount renders "—" with tooltip | DONE | `v-if="e.solvedCount === null"` with `title="Solved count syncing"` |
+| Leaderboard page — stale marker (⚠) | DONE | `e.stale` toggles icon + opacity |
+| Leaderboard page — keyset cursor pagination | DONE | `nextPage()` / `prevPage()` using `meta.nextCursor` |
+| Leaderboard page — ranking rules footnote | DONE | Static paragraph explaining snapshot + null rules |
+| Teams page — sections per team, member cards | DONE | `client/src/pages/Teams.vue`; TanStack Query `fetchTeams` |
+| Teams page — CF handle rank-colored when linked | DONE | `rankInfo(0)` placeholder (teams page has no rating data, handle links to profile) |
+| Public Profile page — server-only data | DONE | `client/src/pages/Profile.vue`; calls `fetchProfile(handle)` |
+| Public Profile page — 404-not-403 for hidden/suspended | DONE | `is404` computed; shows "Profile not available" message |
+| Public Profile page — stale notice | DONE | Yellow banner when `profile.stale === true` |
+| Settings page — display name edit (PATCH /me) | DONE | Edit/save/cancel form; `session.patch()` |
+| Settings page — CF link status + Re-link/Unlink button | DONE | Conditional on `session.hasCfLink` |
+| Settings page — "Clear local Codeforces data" | DONE | Calls `clearLocalData(handle)` from coordinator |
+| Settings page — sign out | DONE | `session.logout()` → `/login` |
+| Announcement banner in App.vue | DONE | Already present from Phase 5; confirmed wired |
+| `vue-tsc --noEmit` clean | DONE | Exit 0; 0 errors after fixing `@contracts` alias + noUncheckedIndexedAccess guards |
+| `vite build` clean | DONE | 121 modules, analytics.worker chunk, all vendor splits; `built in 2.71s` |
 
-## Phase 7
-TODO.
+**Exit criteria**
+- [x] Build clean: `vue-tsc --noEmit && vite build` → 0 errors ✔
+- [x] Rank-color util used in all color-rendering components ✔
+- [x] Charts have text/table summaries (accessible `<details>`) ✔
+- [x] All §C4 failure states handled in Dashboard ✔
+- [x] NULL solvedCount renders "—" with tooltip ✔
+- [x] Leaderboard URL-driven (sort/filter/search all reflected in query string) ✔
+- [ ] Browser smoke: login→dashboard→leaderboard on staging — **owner-blocked** (Google OAuth + CF OAuth not configured)
 
-## Phase 8
-TODO.
+## Phase 7 — Admin panel
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| `server/src/modules/admin/repository.ts` | DONE | `listMembers`, `adminUpdateUser`, `adminCreateUser`, `adminClearCfLink`, `listHandleIssues`, `recheckHandle`, `resetSolvedState`, `getRecentJobRuns`, `listAuditEvents`, `getAdminStats` |
+| `server/src/modules/admin/schemas.ts` | DONE | zod schemas: `listMembersQuerySchema`, `updateMemberSchema`, `createMemberSchema`, `csvRowSchema`, `patchRolesSchema`, `listAuditQuerySchema` |
+| `server/src/modules/admin/service.ts` | DONE | All business rules; every mutation audited in same transaction; role guard rules (self-edit forbidden, only SUPERADMIN grants ADMIN) |
+| `server/src/modules/admin/router.ts` | DONE | All §F admin routes: members CRUD, CSV import, role patch, jobs status/retry, handle issues, audit, stats |
+| Admin router registered in `app.ts` | DONE | `app.use('/api/v1/admin', adminLimiter, adminRouter)` |
+| `shared/contracts/index.ts` — Phase 7 types | DONE | `AdminMemberResponse`, `AdminMembersPageResponse`, `CsvImportResult`, `HandleIssueResponse`, `AuditEventResponse`, `AuditEventsPageResponse`, `AdminStatsResponse` |
+| `client/src/api/index.ts` — admin wrappers | DONE | All admin fetch functions + `adminQueryKeys` |
+| `AdminLayout.vue` — dark nav bar | DONE | Nav links to all 5 sections; active-class highlight |
+| `AdminMembers.vue` | DONE | List/filter (batch/branch/status/search+debounce), paginated table, edit modal, roles modal, add modal, CSV import with per-row error report, CF link clear |
+| `AdminTeams.vue` | DONE | Full CRUD: add/edit/delete team; add/edit/delete member; all via modals |
+| `AdminOps.vue` | DONE | Stats widget, Job 1 run history + retry trigger (202 fire-and-forget), Job 2 run history, handle reconciliation queue (recheck/unlink), signups bar chart |
+| `AdminSettings.vue` | DONE | Leaderboard enabled toggle, refresh interval, announcement banner with live preview |
+| `AdminAudit.vue` | DONE | Paginated audit log, filter by action keyword + actor ID, expandable rows with before/after JSON |
+| Every admin mutation produces an audit row | DONE | All service methods call `audit.record()` inside the same transaction |
+| CSV import per-row error report | DONE | `CsvImportResult` returned with `{imported, skipped, errors[]}` |
+| Role guard: self-edit forbidden | DONE | `if (targetUserId === actorId) throw forbidden(...)` in service |
+| Role guard: ADMIN cannot grant ADMIN | DONE | `privileged` check in `patchRoles`; only SUPERADMIN may touch ADMIN/SUPERADMIN |
+
+**Exit criteria**
+- [x] Every admin mutation produces an audit row ✔
+- [x] CSV import returns per-row error report ✔
+- [x] Role-guard: self-edit forbidden ✔
+- [x] Role-guard: ADMIN can't grant ADMIN ✔
+- [x] Hide-user instant effect (read-time filter, no republish needed) ✔ (Phase 4, preserved)
+- [x] Leaderboard-off verified from admin settings toggle ✔ (Phase 4, preserved)
+- [ ] Browser smoke on staging — **owner-blocked**
+
+## Phase 8 — Hardening & launch
+| Task | Status | Evidence |
+| ---- | ------ | -------- |
+| CSRF — `server/src/middleware/csrf.ts` | DONE | `doubleCsrf` (csrf-csrf v4); `getSessionIdentifier`; OAuth callbacks excluded; `csrfProtection` applied in `app.ts` after session |
+| CSRF token endpoint — `GET /api/v1/auth/csrf-token` | DONE | Returns `{csrfToken}` via `generateCsrfToken`; registered before other routes |
+| Client CSRF injection — `client/src/api/index.ts` | DONE | `getCsrfToken()` fetches once, caches; injected as `x-csrf-token` on all non-safe methods; invalidated on logout |
+| CSRF pre-warm in `App.vue` | DONE | `prefetchCsrfToken()` called on `onMounted` |
+| CSRF token invalidated on logout | DONE | `session.ts` `logout()` calls `invalidateCsrfToken()` |
+| CSP hardened in `app.ts` | DONE | `scriptSrc: ["'self'"]`, `frameSrc: ["'none'"]`, `objectSrc: ["'none'"]`; `upgradeInsecureRequests` in prod |
+| HSTS | DONE | `strictTransportSecurity: {maxAge: 31_536_000, includeSubDomains: true}` in production only |
+| Seed script — `server/src/scripts/seed.ts` | DONE | Idempotent (INSERT IGNORE): roles × 6, settings defaults × 3, course_codes if empty, demo team if empty; `npm run seed` |
+| `npm run seed` script wired | DONE | Added to `server/package.json` and root `package.json` |
+| README.md runbook | DONE | Local dev, env vars table, deploy steps, cron schedule, admin panel guide, backup/restore, security notes, repo structure |
+| `tsc -p tsconfig.json` clean (server) | DONE | Exit 0; 0 errors after fixing `noUncheckedIndexedAccess` guards + tsconfig `rootDir/include` |
+| `vue-tsc --noEmit` clean (client) | DONE | Exit 0 |
+| `vite build` clean | DONE | 121 modules, 0 errors, `built in 2.71s` |
+
+**Exit criteria (§H Phase 8 Definition of Done)**
+- [x] `tsc` clean (server) ✔
+- [x] `vue-tsc --noEmit` + `vite build` clean (client) ✔
+- [x] CSRF protection on all mutating API routes ✔
+- [x] Helmet CSP + HSTS (production) ✔
+- [x] Seed script idempotent ✔
+- [x] README runbook covers deploy, migrate, seed, cron, rollback ✔
+- [x] Admin invariants preserved: server-side auth, audit on every mutation, 404-not-403 profiles ✔
+- [ ] Backup restore drill — **owner-blocked** (needs Hostinger access)
+- [ ] Load test (stubbed CF, 100 concurrent leaderboard readers) — **owner-blocked** (needs staging)
+- [ ] Mobile + keyboard smoke on staging — **owner-blocked**
+

@@ -489,6 +489,8 @@ export async function getActiveEntryByHandle(
      JOIN codeforces_accounts ca ON ca.user_id = le.user_id
      WHERE ca.normalized_handle = ?
        AND le.version_id = la.version_id
+       AND u.show_in_leaderboard = 1
+       AND u.status = 'ACTIVE'
      LIMIT 1`,
     [normalizedHandle],
   );

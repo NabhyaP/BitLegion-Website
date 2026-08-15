@@ -169,3 +169,19 @@ export async function seedSolvedState(userId: number, db: Db = defaultPool): Pro
 export async function deleteSolvedState(userId: number, db: Db = defaultPool): Promise<void> {
   await db.query(`DELETE FROM codeforces_solved_state WHERE user_id = ?`, [userId]);
 }
+
+/** Returns a lightweight solved-state summary for the /me endpoint (§F). */
+export async function getSolvedStateSummary(
+  userId: number,
+  db: Db = defaultPool,
+): Promise<{ solvedCount: number; lastSyncedAt: Date | null } | null> {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT solved_count, last_synced_at FROM codeforces_solved_state WHERE user_id = ?`,
+    [userId],
+  );
+  if (!rows[0]) return null;
+  return {
+    solvedCount: Number(rows[0].solved_count),
+    lastSyncedAt: rows[0].last_synced_at ? new Date(rows[0].last_synced_at) : null,
+  };
+}

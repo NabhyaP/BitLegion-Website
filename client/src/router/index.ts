@@ -110,5 +110,11 @@ router.beforeEach(async (to) => {
     return '/onboarding';
   }
 
+  // CF link just completed — force session refresh so hasCfLink is accurate
+  if (to.query.linked === '1' && authed) {
+    session.invalidate();
+    await session.load(true);
+  }
+
   return true;
 });

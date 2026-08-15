@@ -1,139 +1,465 @@
 <script setup lang="ts">
 /**
- * Dashboard — Phase 5 version.
- * Starts the CF data fetch cycle using the coordinator.
- * Displays reactive state from the coordinator refs.
- * Full widget UI (charts, calendar, donut) is Phase 6.
- * §0.3: zero business logic in this template — all in coordinator/store.
+ * Dashboard — Phase 6.
+ * Widgets: stat row, rating line chart (SVG), tag donut (SVG), difficulty bars,
+ * practice calendar (heatmap), language usage, manual refresh, freshness label.
+ * All business logic in coordinator / analytics — this template is presentation-only (§0.3).
+ * Each widget has its own failure state per §C4.
  */
-import { onMounted, watch } from 'vue';
+import { onMounted, watch, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { useSessionStore } from '@/stores/session.ts';
 import { getHandleRefs, refresh } from '@/codeforces/coordinator.ts';
 import { isStorageUnavailable } from '@/codeforces/cache.ts';
+import { rankInfo } from '@/utils/rankColor.ts';
 
 const session = useSessionStore();
+const route = useRoute();
 
-// Reactive CF state — only populated once we know the handle
-const cfHandle = session.cfHandle;
-const cfRefs = cfHandle ? getHandleRefs(cfHandle) : null;
+const cfHandle = computed(() => session.cfHandle);
+const cfRefs = computed(() => (cfHandle.value ? getHandleRefs(cfHandle.value) : null));
 
 onMounted(async () => {
-  await session.load();
-  const handle = session.cfHandle;
-  if (handle) {
-    // Non-blocking: start fetching CF data
-    refresh(handle);
-  }
+  // Always force-reload on dashboard — session may be stale (e.g. just linked CF).
+  await session.load(true);
+  if (session.cfHandle) refresh(session.cfHandle);
 });
 
-// If CF handle changes mid-session (rare but possible), restart
-watch(
-  () => session.cfHandle,
-  (newHandle) => {
-    if (newHandle) refresh(newHandle);
-  },
+// Trigger refresh when cfHandle becomes available after load
+watch(cfHandle, (h, prev) => {
+  if (h && h !== prev) refresh(h);
+});
+
+// ── Rank info ──────────────────────────────────────────────────────────────
+const ratingRank = computed(() => {
+  const r = cfRefs.value?.profile.value?.rating;
+  return r !== undefined ? rankInfo(r) : null;
+});
+const maxRatingRank = computed(() => {
+  const r = cfRefs.value?.profile.value?.maxRating;
+  return r !== undefined ? rankInfo(r) : null;
+});
+
+// ── Rating line chart (SVG) ───────────────────────────────────────────────
+const CHART_W = 600;
+const CHART_H = 180;
+const CHART_PAD = { top: 16, right: 16, bottom: 24, left: 48 };
+
+const chartPath = computed(() => {
+  const ratings = cfRefs.value?.ratings.value;
+  if (!ratings || ratings.length < 2) return null;
+  const xs = ratings.map((r) => r.timeSeconds);
+  const ys = ratings.map((r) => r.newRating);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const W = CHART_W - CHART_PAD.left - CHART_PAD.right;
+  const H = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
+  const px = (x: number) => CHART_PAD.left + ((x - minX) / rangeX) * W;
+  const py = (y: number) => CHART_PAD.top + H - ((y - minY) / rangeY) * H;
+  const d = ratings.map((r, i) => `${i === 0 ? 'M' : 'L'}${px(r.timeSeconds).toFixed(1)},${py(r.newRating).toFixed(1)}`).join(' ');
+  const lastX = px(xs[xs.length - 1]!).toFixed(1);
+  const lastY = py(ys[ys.length - 1]!).toFixed(1);
+  // Y-axis labels
+  const yTicks = [minY, Math.round((minY + maxY) / 2), maxY];
+  const yTickLines = yTicks.map((v) => ({
+    y: py(v).toFixed(1),
+    label: String(v),
+  }));
+  return { d, lastX, lastY, yTickLines, minX, maxX, px, py };
+});
+
+// ── Tag donut (SVG) ───────────────────────────────────────────────────────
+const DONUT_R = 70;
+const DONUT_INNER = 40;
+const DONUT_CX = 90;
+const DONUT_CY = 90;
+
+const DONUT_COLORS = [
+  '#4f46e5','#0891b2','#059669','#d97706','#dc2626',
+  '#7c3aed','#0284c7','#16a34a','#b45309','#e11d48','#64748b',
+];
+
+const donutArcs = computed(() => {
+  const tags = cfRefs.value?.analytics.value?.topTags;
+  if (!tags || tags.length === 0) return null;
+  const total = tags.reduce((s, t) => s + t.count, 0);
+  let angle = -Math.PI / 2;
+  return tags.map((t, i) => {
+    const sweep = (t.count / total) * 2 * Math.PI;
+    const x1 = DONUT_CX + DONUT_R * Math.cos(angle);
+    const y1 = DONUT_CY + DONUT_R * Math.sin(angle);
+    angle += sweep;
+    const x2 = DONUT_CX + DONUT_R * Math.cos(angle);
+    const y2 = DONUT_CY + DONUT_R * Math.sin(angle);
+    const large = sweep > Math.PI ? 1 : 0;
+    const ix1 = DONUT_CX + DONUT_INNER * Math.cos(angle - sweep);
+    const iy1 = DONUT_CY + DONUT_INNER * Math.sin(angle - sweep);
+    const ix2 = DONUT_CX + DONUT_INNER * Math.cos(angle);
+    const iy2 = DONUT_CY + DONUT_INNER * Math.sin(angle);
+    const path = `M${x1.toFixed(2)},${y1.toFixed(2)} A${DONUT_R},${DONUT_R} 0 ${large},1 ${x2.toFixed(2)},${y2.toFixed(2)} L${ix2.toFixed(2)},${iy2.toFixed(2)} A${DONUT_INNER},${DONUT_INNER} 0 ${large},0 ${ix1.toFixed(2)},${iy1.toFixed(2)} Z`;
+    return { path, color: DONUT_COLORS[i % DONUT_COLORS.length], tag: t.tag, count: t.count };
+  });
+});
+
+// ── Difficulty bars ───────────────────────────────────────────────────────
+const diffBars = computed(() => {
+  const dist = cfRefs.value?.analytics.value?.difficultyDistribution;
+  if (!dist || dist.length === 0) return null;
+  const maxCount = Math.max(...dist.map((d) => d.count));
+  return dist.map((d) => ({
+    label: d.rating === null ? 'Unrated' : String(d.rating),
+    count: d.count,
+    pct: maxCount > 0 ? (d.count / maxCount) * 100 : 0,
+    color: d.rating === null ? '#94a3b8' : rankInfo(d.rating ?? 0).color,
+  }));
+});
+
+// ── Practice calendar (last 52 weeks) ────────────────────────────────────
+const calendarCells = computed(() => {
+  const cal = cfRefs.value?.analytics.value?.practiceCalendar;
+  if (!cal) return null;
+  const map = new Map(cal.map((c) => [c.date, c.count]));
+  const today = new Date();
+  const startDay = new Date(today);
+  startDay.setDate(today.getDate() - 364 - today.getDay());
+  const cells: Array<{ date: string; count: number; wi: number; di: number }> = [];
+  for (let w = 0; w < 53; w++) {
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(startDay);
+      dt.setDate(startDay.getDate() + w * 7 + d);
+      if (dt > today) { cells.push({ date: '', count: -1, wi: w, di: d }); continue; }
+      const key = dt.toISOString().slice(0, 10);
+      cells.push({ date: key, count: map.get(key) ?? 0, wi: w, di: d });
+    }
+  }
+  return cells;
+});
+
+function calColor(count: number): string {
+  if (count <= 0) return '#e2e8f0';
+  if (count <= 2) return '#bbf7d0';
+  if (count <= 5) return '#4ade80';
+  if (count <= 10) return '#16a34a';
+  return '#15803d';
+}
+
+// ── Freshness label ───────────────────────────────────────────────────────
+const freshnessLabel = computed(() => {
+  const ts = cfRefs.value?.lastSuccessAt.value;
+  if (!ts) return null;
+  const ago = Math.round((Date.now() - ts) / 60000);
+  if (ago < 1) return 'Updated just now';
+  if (ago === 1) return 'Updated 1 min ago';
+  return `Updated ${ago} min ago`;
+});
+
+const isRefreshing = computed(() =>
+  cfRefs.value?.status.value === 'loading' || cfRefs.value?.status.value === 'revalidating',
 );
+
+function doRefresh() {
+  if (session.cfHandle) refresh(session.cfHandle);
+}
 </script>
 
 <template>
-  <main style="padding:2rem;max-width:64rem;margin:0 auto">
-    <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
-      <h1>Dashboard</h1>
-      <div style="display:flex;gap:1rem;align-items:center">
-        <span v-if="session.me">{{ session.me.displayName }}</span>
+  <main style="padding:2rem;max-width:72rem;margin:0 auto">
+    <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:0.5rem">
+      <h1 style="margin:0">Dashboard</h1>
+      <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+        <span v-if="session.me" style="font-size:0.9rem;color:#475569">{{ session.me.displayName }}</span>
+        <RouterLink to="/leaderboard">Leaderboard</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
-        <button @click="session.logout().then(() => $router.push('/login'))">Sign out</button>
+        <RouterLink v-if="session.isAdmin" to="/admin"
+                    style="background:#1e293b;color:#fff;padding:0.25rem 0.75rem;border-radius:4px;text-decoration:none;font-size:0.85rem">
+          Admin ⚙
+        </RouterLink>
       </div>
     </header>
 
-    <!-- Storage unavailable notice (§C4) -->
-    <div
-      v-if="isStorageUnavailable()"
-      role="alert"
-      style="background:#fef3c7;border:1px solid #d97706;padding:0.75rem;border-radius:4px;margin-bottom:1rem"
-    >
-      IndexedDB is not available. Codeforces data will be lost on page reload.
+    <!-- Storage unavailable notice -->
+    <div v-if="isStorageUnavailable()" role="alert" aria-live="polite"
+         style="background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+      <strong>Notice:</strong> IndexedDB is not available. Codeforces data will be lost on page reload.
     </div>
 
     <!-- No CF link -->
-    <section v-if="!session.hasCfLink" style="background:#f8fafc;padding:1.5rem;border-radius:4px">
-      <p>Your Codeforces handle is not linked yet.</p>
-      <RouterLink to="/onboarding">Link Codeforces →</RouterLink>
+    <section v-if="!session.hasCfLink && !session.loading"
+             style="background:#f8fafc;padding:2rem;border-radius:6px;text-align:center">
+      <p style="margin-bottom:1rem">Your Codeforces handle is not linked yet.</p>
+      <a href="/api/v1/codeforces/link/start"
+         style="background:#4f46e5;color:#fff;padding:0.5rem 1.25rem;border-radius:4px;text-decoration:none">
+        Link Codeforces →
+      </a>
     </section>
 
-    <!-- CF data section -->
+    <!-- Loading session -->
+    <div v-else-if="!session.hasCfLink && session.loading"
+         role="status" style="padding:2rem;text-align:center;color:#94a3b8">
+      Loading…
+    </div>
+
     <template v-else-if="cfRefs">
-      <!-- Rate-limited notice (§C4) -->
-      <div
-        v-if="cfRefs.status.value === 'rate-limited'"
-        role="alert"
-        style="background:#fee2e2;border:1px solid #dc2626;padding:0.75rem;border-radius:4px;margin-bottom:1rem"
-      >
-        Codeforces rate limit reached. Your data is cached.
-        <button style="margin-left:1rem" @click="refresh(session.cfHandle!)">Retry</button>
-        <small style="display:block;margin-top:0.25rem">
-          Note: Many students on the same network share CF's rate limit.
+      <!-- Rate-limited notice -->
+      <div v-if="cfRefs.status.value === 'rate-limited'" role="alert" aria-live="assertive"
+           style="background:#fee2e2;border:1px solid #dc2626;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+        <strong>Rate limit reached.</strong> Your cached data is shown below.
+        <button style="margin-left:1rem;cursor:pointer" @click="doRefresh">Retry</button>
+        <small style="display:block;margin-top:0.25rem;color:#7f1d1d">
+          Note: Many students on the same campus network share Codeforces' rate limit.
         </small>
       </div>
 
-      <!-- CF unavailable notice (§C4) -->
-      <div
-        v-if="cfRefs.status.value === 'cf-unavailable'"
-        role="alert"
-        style="background:#fef3c7;padding:0.75rem;border-radius:4px;margin-bottom:1rem"
-      >
-        Codeforces is currently unavailable. Showing cached data.
+      <!-- CF unavailable notice -->
+      <div v-if="cfRefs.status.value === 'cf-unavailable'" role="alert" aria-live="polite"
+           style="background:#fef3c7;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+        <strong>Codeforces is currently unavailable.</strong> Showing cached data.
       </div>
 
-      <!-- First visit, no cache (§C4) -->
-      <div v-if="cfRefs.status.value === 'loading' && !cfRefs.profile.value" style="padding:1rem">
+      <!-- Error: first visit, no cache -->
+      <div v-if="cfRefs.status.value === 'error' && !cfRefs.profile.value" role="alert"
+           style="background:#fee2e2;border-radius:4px;padding:1rem;margin-bottom:1rem">
+        Could not load Codeforces data.
+        <span v-if="cfRefs.errorMessage.value" style="margin-left:0.25rem">({{ cfRefs.errorMessage.value }})</span>
+        <button style="margin-left:1rem;cursor:pointer" @click="doRefresh">Retry</button>
+        <p style="margin-top:0.5rem;font-size:0.85rem;color:#475569">The rest of BitLegion is fully usable.</p>
+      </div>
+
+      <!-- Loading spinner — first visit only -->
+      <div v-if="cfRefs.status.value === 'loading' && !cfRefs.profile.value"
+           aria-live="polite" role="status" style="padding:2rem;text-align:center;color:#64748b">
         Loading Codeforces data for <strong>{{ session.cfHandle }}</strong>…
       </div>
 
-      <!-- Stat row (Phase 6 adds real widgets) -->
-      <template v-else-if="cfRefs.profile.value">
-        <div
-          style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:1.5rem"
-        >
-          <div style="background:#f8fafc;padding:1rem;border-radius:4px;text-align:center">
-            <div style="font-size:1.5rem;font-weight:700">{{ cfRefs.profile.value.rating }}</div>
-            <div style="font-size:0.8rem;color:#64748b">Current Rating</div>
+      <!-- Main content — shown once we have a profile -->
+      <template v-if="cfRefs.profile.value">
+
+        <!-- Freshness + refresh button -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.75rem;margin-bottom:1rem;font-size:0.8rem;color:#94a3b8">
+          <span v-if="cfRefs.stale.value">⚠ Data may be stale</span>
+          <span v-else-if="freshnessLabel">{{ freshnessLabel }}</span>
+          <span v-if="isRefreshing" aria-live="polite">Refreshing…</span>
+          <button
+            :disabled="isRefreshing"
+            style="font-size:0.8rem;cursor:pointer;padding:0.25rem 0.75rem;border:1px solid #cbd5e1;border-radius:4px;background:#fff"
+            :aria-label="isRefreshing ? 'Refreshing data' : 'Refresh Codeforces data'"
+            @click="doRefresh"
+          >
+            {{ isRefreshing ? 'Refreshing…' : 'Refresh' }}
+          </button>
+        </div>
+
+        <!-- Stat row -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:2rem"
+             role="region" aria-label="Codeforces stats summary">
+          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+            <div :style="{ fontSize:'1.75rem', fontWeight:700, color: ratingRank?.color }">
+              {{ cfRefs.profile.value.rating }}
+            </div>
+            <div style="font-size:0.75rem;color:#64748b">Current Rating</div>
+            <div style="font-size:0.75rem" :style="{ color: ratingRank?.color }">{{ ratingRank?.label }}</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:4px;text-align:center">
-            <div style="font-size:1.5rem;font-weight:700">{{ cfRefs.profile.value.maxRating }}</div>
-            <div style="font-size:0.8rem;color:#64748b">Max Rating</div>
+          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+            <div :style="{ fontSize:'1.75rem', fontWeight:700, color: maxRatingRank?.color }">
+              {{ cfRefs.profile.value.maxRating }}
+            </div>
+            <div style="font-size:0.75rem;color:#64748b">Max Rating</div>
+            <div style="font-size:0.75rem" :style="{ color: maxRatingRank?.color }">{{ maxRatingRank?.label }}</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:4px;text-align:center">
-            <div style="font-size:1.5rem;font-weight:700">
+          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
               {{ cfRefs.analytics.value?.uniqueAccepted ?? '—' }}
             </div>
-            <div style="font-size:0.8rem;color:#64748b">Problems Solved</div>
+            <div style="font-size:0.75rem;color:#64748b">Problems Solved</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:4px;text-align:center">
-            <div style="font-size:1.5rem;font-weight:700">{{ cfRefs.ratings.value.length }}</div>
-            <div style="font-size:0.8rem;color:#64748b">Contests</div>
+          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
+              {{ cfRefs.ratings.value.length }}
+            </div>
+            <div style="font-size:0.75rem;color:#64748b">Contests</div>
+          </div>
+          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
+              {{ cfRefs.analytics.value?.attemptedUnsolved ?? '—' }}
+            </div>
+            <div style="font-size:0.75rem;color:#64748b">Unsolved Attempts</div>
           </div>
         </div>
 
-        <!-- Freshness label (§B4 "updated at labels on all CF-derived data") -->
-        <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:1rem">
-          <template v-if="cfRefs.stale.value">⚠ Data may be stale — </template>
-          <template v-else-if="cfRefs.lastSuccessAt.value">
-            Updated {{ new Date(cfRefs.lastSuccessAt.value).toLocaleTimeString() }} —
+        <!-- Rating history chart -->
+        <section style="margin-bottom:2rem;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+                 aria-label="Rating history chart">
+          <h2 style="font-size:1rem;margin:0 0 0.75rem">Rating History</h2>
+          <div v-if="!chartPath" style="color:#94a3b8;font-size:0.9rem">
+            Not enough contest data to show a chart.
+          </div>
+          <template v-else>
+            <svg
+              :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
+              style="width:100%;height:auto;display:block"
+              role="img"
+              aria-label="Rating history line chart"
+            >
+              <!-- Grid lines -->
+              <line
+                v-for="tick in chartPath.yTickLines"
+                :key="tick.label"
+                :x1="CHART_PAD.left" :y1="tick.y"
+                :x2="CHART_W - CHART_PAD.right" :y2="tick.y"
+                stroke="#e2e8f0" stroke-width="1"
+              />
+              <!-- Y axis labels -->
+              <text
+                v-for="tick in chartPath.yTickLines"
+                :key="'label-' + tick.label"
+                :x="CHART_PAD.left - 4"
+                :y="tick.y"
+                font-size="11"
+                fill="#94a3b8"
+                text-anchor="end"
+                dominant-baseline="middle"
+              >{{ tick.label }}</text>
+              <!-- Line -->
+              <path :d="chartPath.d" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round" />
+              <!-- Current point -->
+              <circle :cx="chartPath.lastX" :cy="chartPath.lastY" r="4" fill="#4f46e5" />
+            </svg>
+            <!-- Text summary for accessibility -->
+            <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+              <summary>Rating history data</summary>
+              <ul style="max-height:8rem;overflow-y:auto;margin:0.5rem 0 0;padding-left:1.5rem">
+                <li v-for="r in cfRefs.ratings.value" :key="r.contestId">
+                  {{ r.contestName }}: {{ r.oldRating }} → {{ r.newRating }}
+                  ({{ r.newRating - r.oldRating >= 0 ? '+' : '' }}{{ r.newRating - r.oldRating }})
+                </li>
+              </ul>
+            </details>
           </template>
-          <button
-            :disabled="cfRefs.status.value === 'loading' || cfRefs.status.value === 'revalidating'"
-            style="font-size:0.8rem;cursor:pointer"
-            @click="refresh(session.cfHandle!)"
-          >
-            {{ cfRefs.status.value === 'revalidating' ? 'Refreshing…' : 'Refresh' }}
-          </button>
-        </p>
+        </section>
 
-        <!-- Phase 6 placeholder widgets -->
-        <div style="color:#64748b;font-style:italic">
-          Full charts and analytics coming in Phase 6.
+        <!-- Two-column: tag donut + difficulty bars -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.5rem;margin-bottom:2rem">
+
+          <!-- Tag donut -->
+          <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+                   aria-label="Problems by topic">
+            <h2 style="font-size:1rem;margin:0 0 0.75rem">Problems by Topic</h2>
+            <div v-if="!donutArcs" style="color:#94a3b8;font-size:0.9rem">No tag data yet.</div>
+            <template v-else>
+              <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+                <svg :viewBox="`0 0 180 180`" style="width:180px;height:180px;flex-shrink:0"
+                     role="img" aria-label="Topic donut chart">
+                  <path
+                    v-for="arc in donutArcs"
+                    :key="arc.tag"
+                    :d="arc.path"
+                    :fill="arc.color"
+                    :aria-label="`${arc.tag}: ${arc.count}`"
+                  />
+                  <text x="90" y="86" text-anchor="middle" font-size="13" fill="#1e293b" font-weight="600">
+                    {{ cfRefs.analytics.value?.uniqueAccepted }}
+                  </text>
+                  <text x="90" y="101" text-anchor="middle" font-size="10" fill="#64748b">solved</text>
+                </svg>
+                <ul style="list-style:none;padding:0;margin:0;font-size:0.8rem;flex:1;min-width:0">
+                  <li v-for="(arc, i) in donutArcs" :key="arc.tag"
+                      style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.3rem;min-width:0">
+                    <span :style="{ width:'10px', height:'10px', borderRadius:'2px', background: arc.color, flexShrink:0 }" aria-hidden="true"></span>
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ arc.tag }}</span>
+                    <span style="margin-left:auto;color:#64748b;flex-shrink:0">{{ arc.count }}</span>
+                  </li>
+                </ul>
+              </div>
+            </template>
+          </section>
+
+          <!-- Difficulty bars -->
+          <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+                   aria-label="Problems by difficulty">
+            <h2 style="font-size:1rem;margin:0 0 0.75rem">Problems by Difficulty</h2>
+            <div v-if="!diffBars" style="color:#94a3b8;font-size:0.9rem">No difficulty data yet.</div>
+            <template v-else>
+              <div v-for="bar in diffBars" :key="bar.label"
+                   style="display:grid;grid-template-columns:3.5rem 1fr 2rem;gap:0.5rem;align-items:center;margin-bottom:0.5rem;font-size:0.8rem">
+                <span style="text-align:right;color:#475569" :style="{ color: bar.color }">{{ bar.label }}</span>
+                <div style="background:#f1f5f9;border-radius:3px;height:14px;overflow:hidden" role="presentation">
+                  <div :style="{ width: bar.pct + '%', height:'100%', background: bar.color, borderRadius:'3px' }"></div>
+                </div>
+                <span style="color:#64748b">{{ bar.count }}</span>
+              </div>
+              <!-- Text summary for accessibility -->
+              <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+                <summary>Difficulty data table</summary>
+                <table style="width:100%;border-collapse:collapse;margin-top:0.4rem">
+                  <thead><tr><th style="text-align:left;font-weight:600">Rating</th><th style="text-align:right;font-weight:600">Count</th></tr></thead>
+                  <tbody>
+                    <tr v-for="bar in diffBars" :key="'tr-' + bar.label">
+                      <td>{{ bar.label }}</td><td style="text-align:right">{{ bar.count }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </details>
+            </template>
+          </section>
         </div>
+
+        <!-- Practice calendar -->
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem;margin-bottom:2rem"
+                 aria-label="Practice calendar — last 52 weeks">
+          <h2 style="font-size:1rem;margin:0 0 0.75rem">Practice Calendar (last 52 weeks)</h2>
+          <div v-if="!calendarCells" style="color:#94a3b8;font-size:0.9rem">No submission data yet.</div>
+          <template v-else>
+            <div style="overflow-x:auto">
+              <svg
+                :viewBox="`0 0 ${53 * 13 + 2} ${7 * 13 + 2}`"
+                style="display:block;min-width:400px"
+                role="img"
+                aria-label="Practice heatmap calendar"
+              >
+                <g v-for="cell in calendarCells" :key="`${cell.wi}-${cell.di}`">
+                  <rect
+                    :x="cell.wi * 13"
+                    :y="cell.di * 13"
+                    width="11"
+                    height="11"
+                    rx="2"
+                    :fill="cell.count < 0 ? 'transparent' : calColor(cell.count)"
+                  >
+                    <title v-if="cell.date">{{ cell.date }}: {{ cell.count }} submission{{ cell.count !== 1 ? 's' : '' }}</title>
+                  </rect>
+                </g>
+              </svg>
+            </div>
+            <!-- Calendar legend -->
+            <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;font-size:0.75rem;color:#64748b">
+              <span>Less</span>
+              <span v-for="c in ['#e2e8f0','#bbf7d0','#4ade80','#16a34a','#15803d']" :key="c"
+                    :style="{ width:'12px', height:'12px', background:c, borderRadius:'2px', display:'inline-block' }" aria-hidden="true"></span>
+              <span>More</span>
+            </div>
+          </template>
+        </section>
+
+        <!-- Language usage -->
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem;margin-bottom:2rem"
+                 aria-label="Language usage">
+          <h2 style="font-size:1rem;margin:0 0 0.75rem">Language Usage</h2>
+          <div v-if="!cfRefs.analytics.value?.languageUsage?.length" style="color:#94a3b8;font-size:0.9rem">No data yet.</div>
+          <ul v-else style="list-style:none;padding:0;margin:0;font-size:0.85rem;display:flex;flex-wrap:wrap;gap:0.5rem">
+            <li
+              v-for="l in cfRefs.analytics.value.languageUsage.slice(0, 10)"
+              :key="l.language"
+              style="background:#f1f5f9;padding:0.25rem 0.6rem;border-radius:12px;color:#1e293b"
+            >
+              {{ l.language }}: <strong>{{ l.count }}</strong>
+            </li>
+          </ul>
+        </section>
+
       </template>
     </template>
   </main>

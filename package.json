@@ -12,6 +12,7 @@
     "build": "npm run build --workspace=client && npm run build --workspace=server",
     "start": "node server/dist/server.js",
     "migrate": "node --experimental-strip-types server/src/db/migrate.ts",
+    "seed": "npm run seed --workspace=server",
     "test": "node --test --experimental-strip-types \"server/src/**/*.test.ts\"",
     "test:integration": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/run-integration.ps1",
     "lint": "eslint .",

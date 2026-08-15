@@ -136,7 +136,7 @@ async function fetchCf<T>(url: string): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     if (attempt > 0) {
-      const delay = jitter(RETRY_DELAYS[attempt - 1]);
+      const delay = jitter(RETRY_DELAYS[attempt - 1]!);
       await sleep(delay);
     }
     const controller = new AbortController();

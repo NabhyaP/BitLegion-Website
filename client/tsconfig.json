@@ -9,7 +9,8 @@
     "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@contracts": ["../shared/contracts/index.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

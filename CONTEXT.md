@@ -271,3 +271,43 @@ a pre-provisioned user who activates on login can then link a CF handle
   connection (not a pool connection) so the lock is never accidentally shared or released early.
 - `pruneOldReadyVersions` uses a subquery with an alias (`keep_ids`) to work around MySQL's
   restriction on deleting from a table while selecting from it in the same query.
+
+## Phases 6–8 (added 2026-08-14)
+
+### Client build config changes
+- `client/tsconfig.json` — added `"@contracts": ["../shared/contracts/index.ts"]` path alias
+- `client/vite.config.ts` — added matching `'@contracts'` Vite resolve alias
+- Use `import type { Foo } from '@contracts'` in all client files for shared types
+
+### Server tsconfig change
+- `rootDir` widened from `"src"` to `".."` and `"../shared"` added to `include`
+- This lets `tsc` see `shared/contracts/index.ts` without a separate tsconfig
+- All existing `../../../../shared/contracts/index.ts` imports still work
+
+### CSRF (Phase 8)
+- `csrf-csrf` v4 is already in `server/package.json`
+- v4 API: `generateCsrfToken` (not `generateToken`), `getCsrfTokenFromRequest` (not `getTokenFromRequest`), and **requires** `getSessionIdentifier`
+- Token tied to session ID via `getSessionIdentifier: (req) => req.session.id ?? ''`
+- Excluded paths: `/api/v1/auth/google/callback`, `/api/v1/codeforces/link/callback`
+- Client: `getCsrfToken()` in `api/index.ts` fetches once, caches for session, injected as `x-csrf-token`
+
+### noUncheckedIndexedAccess pattern
+`tsconfig.base.json` sets `"noUncheckedIndexedAccess": true`. Any array index `arr[i]`
+returns `T | undefined`. Pattern used throughout: `arr[i]!` when the index is known safe,
+or `for...of` loops instead of index loops.
+
+### Admin module
+New `server/src/modules/admin/` follows the standard 4-file module pattern.
+All admin SQL is in `repository.ts` (§0.5). Every mutation goes through `service.ts`
+which calls `audit.record()` inside the same connection transaction.
+Router registered at `/api/v1/admin` — comes AFTER the Phase 4 specific admin routes
+(`/api/v1/admin/settings`, `/api/v1/admin/teams`) so those more-specific prefixes take
+priority.
+
+### Seed script
+`server/src/scripts/seed.ts` — run once post-deploy:
+```
+npm run seed                   # root alias
+npm run seed --workspace=server  # or directly
+```
+Idempotent: all writes use `INSERT IGNORE`. Safe to re-run.

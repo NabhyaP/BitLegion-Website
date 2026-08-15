@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import * as repo from './repository.ts';
 import type { SortField, QueryLeaderboardOptions } from './repository.ts';
 import * as settingsRepo from '../settings/repository.ts';
-import type { LeaderboardEntry, LeaderboardMeta, LeaderboardResponse } from '../../../shared/contracts/index.ts';
+import type { LeaderboardEntry, LeaderboardMeta, LeaderboardResponse } from '../../../../shared/contracts/index.ts';
 
 // ---------------------------------------------------------------------------
 // In-process cache for the active snapshot meta (60 s, §F)
@@ -76,12 +76,13 @@ export async function getLeaderboard(
   // 4. Decode cursor
   const cursor = query.cursor ? repo.decodeCursor(query.cursor) : null;
 
-  // 5. Query
+  // 5. Query — scope gates which filters are active
   const opts: QueryLeaderboardOptions = {
     versionId,
     sort: query.sort,
-    batch: query.batch ?? null,
-    branch: query.branch ?? null,
+    // scope=all ignores batch+branch; scope=batch ignores branch; scope=branch ignores batch
+    batch: query.scope !== 'branch' ? (query.batch ?? null) : null,
+    branch: query.scope !== 'batch' ? (query.branch ?? null) : null,
     q: query.q ?? null,
     limit: query.limit,
     cursor,
@@ -96,7 +97,7 @@ export async function getLeaderboard(
   // 7. Build next cursor from last row
   let nextCursor: string | null = null;
   if (hasMore && pageRows.length > 0) {
-    const last = pageRows[pageRows.length - 1];
+    const last = pageRows[pageRows.length - 1]!;
     nextCursor = repo.encodeCursor({
       rating: last.rating,
       maxRating: last.maxRating,

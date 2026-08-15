@@ -7,8 +7,8 @@
  */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { fetchMe, patchMe, logout as apiLogout } from '@/api/index.ts';
-import type { MeResponse } from '../../../../shared/contracts/index.ts';
+import { fetchMe, patchMe, logout as apiLogout, invalidateCsrfToken } from '@/api/index.ts';
+import type { MeResponse } from '@contracts';
 
 export const useSessionStore = defineStore('session', () => {
   // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ export const useSessionStore = defineStore('session', () => {
   // Derived
   // ---------------------------------------------------------------------------
   const isAdmin = computed(() =>
-    (me.value?.roles ?? []).some((r) => r === 'ADMIN' || r === 'SUPERADMIN'),
+    (me.value?.roles ?? []).some((r: string) => r === 'ADMIN' || r === 'SUPERADMIN'),
   );
 
   const hasCfLink = computed(
@@ -71,6 +71,7 @@ export const useSessionStore = defineStore('session', () => {
 
   async function logout(): Promise<void> {
     await apiLogout();
+    invalidateCsrfToken();   // session changed — old token is dead
     me.value = null;
     signedIn.value = false;
   }

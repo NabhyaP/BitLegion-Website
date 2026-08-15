@@ -2,12 +2,15 @@
 import { onMounted } from 'vue';
 import { useSessionStore } from '@/stores/session.ts';
 import { useQuery } from '@tanstack/vue-query';
-import { fetchPublicSettings, queryKeys } from '@/api/index.ts';
+import { fetchPublicSettings, queryKeys, prefetchCsrfToken } from '@/api/index.ts';
 
 const session = useSessionStore();
 
-// Warm the session cache on app boot (non-blocking)
-onMounted(() => session.load());
+// Warm the session cache and CSRF token on app boot (non-blocking)
+onMounted(() => {
+  session.load();
+  prefetchCsrfToken();
+});
 
 // Announcement banner — pulled once, cached 60 s
 const { data: settings } = useQuery({

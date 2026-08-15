@@ -115,7 +115,7 @@ async function bisectBadHandles(
   badHandles: Set<string>,
 ): Promise<cf.CfUserInfo[]> {
   if (batch.length === 1) {
-    const user = batch[0];
+    const user = batch[0]!;
     badHandles.add(user.normalizedHandle);
     // Determine: NOT_FOUND vs RENAMED — CF doesn't give us enough info here so use NOT_FOUND.
     await markAccountStatus(user.userId, 'NOT_FOUND');
@@ -204,7 +204,7 @@ async function run(): Promise<void> {
             errorSummary = 'Rate-limited mid-run; some entries carried forward.';
             // Mark remaining users as not fetched (handled by stale logic below).
             for (let j = i + batchSize; j < users.length; j++) {
-              badHandles.add(users[j].normalizedHandle);
+              badHandles.add(users[j]!.normalizedHandle);
             }
             break;
           } else {
@@ -288,7 +288,7 @@ async function run(): Promise<void> {
       });
 
       // Assign positions (1-based).
-      for (let i = 0; i < entries.length; i++) entries[i].position = i + 1;
+      for (let i = 0; i < entries.length; i++) entries[i]!.position = i + 1;
 
       // Update stats before activation.
       await lbRepo.updateVersionStats(versionId, {

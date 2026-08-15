@@ -116,48 +116,66 @@ export async function refresh(rawHandle: string): Promise<void> {
   if (_refreshing.has(handle)) return;
 
   const refs = getHandleRefs(handle);
+  refs.storageUnavailable.value = cache.isStorageUnavailable();
 
-  // Try cross-tab leader lock; if another tab owns it, skip (they'll update)
+  // Always load cached data first — so the UI shows something immediately
+  // regardless of whether we win the leader lock.
+  const [cachedProfile, cachedRatings, cachedSubs, meta] = await Promise.all([
+    cache.getProfile(handle),
+    cache.getRatings(handle),
+    cache.getSubmissions(handle),
+    cache.getMeta(handle),
+  ]);
+
+  if (cachedProfile) refs.profile.value = cachedProfile;
+  if (cachedRatings) refs.ratings.value = cachedRatings;
+  if (cachedSubs.length) refs.submissions.value = cachedSubs;
+
+  const hadCache = !!cachedProfile;
+  refs.stale.value = hadCache && !cache.isFresh(meta?.profileFetchedAt ?? null);
+  refs.lastSuccessAt.value = meta?.profileFetchedAt ?? null;
+
+  // If cached data is fresh, compute analytics and return without hitting the network.
+  if (cache.isFresh(meta?.profileFetchedAt ?? null) && cache.isFresh(meta?.ratingsFetchedAt ?? null)) {
+    if (cachedSubs.length > 0) {
+      refs.analytics.value = await runAnalytics(cachedSubs);
+    }
+    refs.status.value = 'success';
+    if (cachedSubs.length > 0) return;
+    // Still need submissions — fall through to network fetch
+  }
+
+  // Try cross-tab leader lock. tryBecomeLeader() has a built-in 4-second
+  // blocking fallback so stale locks from dead tabs don't block forever.
   const isLeader = await tryBecomeLeader();
+
   if (!isLeader) {
-    refs.status.value = 'revalidating';
+    // Another tab is refreshing — show cached data with revalidating indicator
+    refs.status.value = hadCache ? 'revalidating' : 'loading';
+    // Retry once after a delay in case the other tab finishes
+    setTimeout(() => {
+      if (refs.status.value === 'revalidating') refresh(rawHandle);
+    }, 5_000);
     return;
   }
 
   _refreshing.add(handle);
-  refs.storageUnavailable.value = cache.isStorageUnavailable();
 
   try {
-    // Load cached data immediately so UI can show stale-while-revalidate
-    const [cachedProfile, cachedRatings, cachedSubs, meta] = await Promise.all([
-      cache.getProfile(handle),
-      cache.getRatings(handle),
-      cache.getSubmissions(handle),
-      cache.getMeta(handle),
-    ]);
-
-    if (cachedProfile) refs.profile.value = cachedProfile;
-    if (cachedRatings) refs.ratings.value = cachedRatings;
-    if (cachedSubs.length) refs.submissions.value = cachedSubs;
-
-    const hadCache = !!cachedProfile;
+    // Cache was already loaded above (before the lock). Use those values.
     const profileFresh = cache.isFresh(meta?.profileFetchedAt ?? null);
     const profileStaleWindow = cache.isWithinStaleWindow(meta?.profileFetchedAt ?? null);
-    refs.stale.value = !profileFresh && hadCache;
-    refs.lastSuccessAt.value = meta?.profileFetchedAt ?? null;
     refs.status.value = hadCache ? (profileFresh ? 'success' : 'revalidating') : 'loading';
 
-    // Skip network if everything is fresh
-    if (profileFresh && cache.isFresh(meta?.ratingsFetchedAt ?? null)) {
-      if (cachedSubs.length > 0) {
-        refs.analytics.value = await runAnalytics(cachedSubs);
-      }
+    // Skip network if everything is fresh and we have submissions
+    if (profileFresh && cache.isFresh(meta?.ratingsFetchedAt ?? null) && cachedSubs.length > 0) {
+      refs.analytics.value = await runAnalytics(cachedSubs);
       refs.status.value = 'success';
       return;
     }
 
     // Fetch profile + ratings in parallel, submissions separately (incremental)
-    let profileOk = profileStaleWindow; // if stale-window, we already have usable cached data
+    let profileOk = profileStaleWindow;
     let ratingsOk = cache.isWithinStaleWindow(meta?.ratingsFetchedAt ?? null);
 
     const [profileResult, ratingsResult] = await Promise.allSettled([

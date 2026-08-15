@@ -9,13 +9,19 @@ import type { RoleCode } from './types.ts';
 
 /** Public shape of the session user. Never includes roles of other users, sessions, or secrets. */
 async function meResponse(user: User, roles: RoleCode[]) {
-  const cfAccount = await cfRepo.findAccountByUserId(user.id);
+  const [cfAccount, solvedState] = await Promise.all([
+    cfRepo.findAccountByUserId(user.id),
+    cfRepo.getSolvedStateSummary(user.id),
+  ]);
   const codeforces =
     cfAccount && cfAccount.status !== 'UNLINKED'
       ? {
           handle: cfAccount.handle,
           status: cfAccount.status,
           verifiedAt: cfAccount.verifiedAt.toISOString(),
+          // solved-state summary (spec §F "/me" contract)
+          solvedCount: solvedState?.solvedCount ?? null,
+          lastSyncedAt: solvedState?.lastSyncedAt?.toISOString() ?? null,
         }
       : null;
   return {

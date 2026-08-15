@@ -36,7 +36,7 @@ async function fetchUsersToSync(limit: number): Promise<SyncUser[]> {
        JOIN users u ON u.id = css.user_id
       WHERE ca.status = 'ACTIVE'
         AND u.status = 'ACTIVE'
-      ORDER BY css.last_synced_at ASC NULLS FIRST
+      ORDER BY css.last_synced_at IS NOT NULL ASC, css.last_synced_at ASC
       LIMIT ?`,
     [limit],
   );
