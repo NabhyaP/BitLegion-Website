@@ -329,7 +329,7 @@ function doRefresh() {
               <circle :cx="chartPath.lastX" :cy="chartPath.lastY" r="4" fill="#4f46e5" />
             </svg>
             <!-- Text summary for accessibility -->
-            <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+            <!-- <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
               <summary>Rating history data</summary>
               <ul style="max-height:8rem;overflow-y:auto;margin:0.5rem 0 0;padding-left:1.5rem">
                 <li v-for="r in cfRefs.ratings.value" :key="r.contestId">
@@ -337,7 +337,7 @@ function doRefresh() {
                   ({{ r.newRating - r.oldRating >= 0 ? '+' : '' }}{{ r.newRating - r.oldRating }})
                 </li>
               </ul>
-            </details>
+            </details> -->
           </template>
         </section>
 
@@ -392,7 +392,7 @@ function doRefresh() {
                 <span style="color:#64748b">{{ bar.count }}</span>
               </div>
               <!-- Text summary for accessibility -->
-              <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+              <!-- <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
                 <summary>Difficulty data table</summary>
                 <table style="width:100%;border-collapse:collapse;margin-top:0.4rem">
                   <thead><tr><th style="text-align:left;font-weight:600">Rating</th><th style="text-align:right;font-weight:600">Count</th></tr></thead>
@@ -402,7 +402,7 @@ function doRefresh() {
                     </tr>
                   </tbody>
                 </table>
-              </details>
+              </details> -->
             </template>
           </section>
         </div>

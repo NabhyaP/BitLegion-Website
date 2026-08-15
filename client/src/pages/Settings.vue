@@ -12,35 +12,35 @@ const router = useRouter();
 onMounted(() => session.load(true));
 
 // ── Display name edit ──────────────────────────────────────────────────────
-const editing = ref(false);
-const displayNameDraft = ref('');
-const saving = ref(false);
-const saveError = ref<string | null>(null);
-const saveSuccess = ref(false);
+// const editing = ref(false);
+// const displayNameDraft = ref('');
+// const saving = ref(false);
+// const saveError = ref<string | null>(null);
+// const saveSuccess = ref(false);
 
-function startEdit() {
-  displayNameDraft.value = session.me?.displayName ?? '';
-  saveError.value = null;
-  saveSuccess.value = false;
-  editing.value = true;
-}
+// function startEdit() {
+//   displayNameDraft.value = session.me?.displayName ?? '';
+//   saveError.value = null;
+//   saveSuccess.value = false;
+//   editing.value = true;
+// }
 
-async function saveDisplayName() {
-  const name = displayNameDraft.value.trim();
-  if (!name) { saveError.value = 'Name cannot be empty.'; return; }
-  saving.value = true;
-  saveError.value = null;
-  try {
-    await session.patch({ displayName: name });
-    editing.value = false;
-    saveSuccess.value = true;
-    setTimeout(() => { saveSuccess.value = false; }, 3000);
-  } catch (e) {
-    saveError.value = e instanceof ApiError ? e.message : 'Failed to save.';
-  } finally {
-    saving.value = false;
-  }
-}
+// async function saveDisplayName() {
+//   const name = displayNameDraft.value.trim();
+//   if (!name) { saveError.value = 'Name cannot be empty.'; return; }
+//   saving.value = true;
+//   saveError.value = null;
+//   try {
+//     await session.patch({ displayName: name });
+//     editing.value = false;
+//     saveSuccess.value = true;
+//     setTimeout(() => { saveSuccess.value = false; }, 3000);
+//   } catch (e) {
+//     saveError.value = e instanceof ApiError ? e.message : 'Failed to save.';
+//   } finally {
+//     saving.value = false;
+//   }
+// }
 
 // ── CF unlink ──────────────────────────────────────────────────────────────
 const unlinking = ref(false);
@@ -106,7 +106,7 @@ async function handleLogout() {
       <div style="font-size:0.9rem;margin-bottom:0.75rem">
         <strong>Display name:</strong>
         <span v-if="!editing" style="margin-left:0.4rem">{{ session.me?.displayName }}</span>
-        <button v-if="!editing"
+        <!-- <button v-if="!editing"
                 style="margin-left:0.75rem;font-size:0.8rem;cursor:pointer;padding:0.2rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px"
                 @click="startEdit">Edit</button>
         <form v-if="editing" @submit.prevent="saveDisplayName"
@@ -123,7 +123,7 @@ async function handleLogout() {
                   @click="editing=false">Cancel</button>
         </form>
         <div v-if="saveError" role="alert" style="color:#dc2626;font-size:0.8rem;margin-top:0.25rem">{{ saveError }}</div>
-        <div v-if="saveSuccess" role="status" style="color:#16a34a;font-size:0.8rem;margin-top:0.25rem">Saved.</div>
+        <div v-if="saveSuccess" role="status" style="color:#16a34a;font-size:0.8rem;margin-top:0.25rem">Saved.</div> -->
       </div>
 
       <div style="font-size:0.9rem;color:#475569">
