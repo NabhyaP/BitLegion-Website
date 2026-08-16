@@ -66,7 +66,7 @@ export class ApiError extends Error {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {

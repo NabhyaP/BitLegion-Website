@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth.ts';
+import { requireAuth, requireRole } from '../../middleware/auth.ts';
 import { badRequest } from '../../shared/errors.ts';
 import * as cfRepo from '../codeforces-links/repository.ts';
+import * as usersRepo from './repository.ts';
 import { patchMeSchema } from './schemas.ts';
 import { patchMe } from './service.ts';
 import type { User } from './types.ts';
@@ -41,6 +42,23 @@ async function meResponse(user: User, roles: RoleCode[]) {
 }
 
 export const meRouter = Router();
+
+// ---------------------------------------------------------------------------
+// Admin — user search (user-picker for teams)
+// ---------------------------------------------------------------------------
+
+export const adminUsersRouter = Router();
+
+adminUsersRouter.get('/search', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const q = String(req.query.q ?? '').trim();
+    if (!q || q.length < 1) return res.json({ data: [] });
+    const results = await usersRepo.searchUsers(q);
+    res.json({ data: results });
+  } catch (err) {
+    next(err);
+  }
+});
 
 meRouter.get('/', requireAuth, async (req, res, next) => {
   try {

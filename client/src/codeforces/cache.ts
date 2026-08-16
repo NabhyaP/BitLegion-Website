@@ -12,8 +12,8 @@ import Dexie, { type Table } from 'dexie';
 import type { CfProfile, CfRatingPoint, CfSubmission, CfCacheMeta } from './types.ts';
 import { SCHEMA_VERSION } from './normalize.ts';
 
-const STALE_MS = 15 * 60 * 1000;       // 15 min — start revalidation
-const MAX_STALE_MS = 30 * 60 * 1000;   // 30 min — upper bound of stale-while-revalidate band
+const STALE_MS = 5 * 60 * 1000;       // 15 min — start revalidation
+const MAX_STALE_MS = 15 * 60 * 1000;   // 30 min — upper bound of stale-while-revalidate band
 const SUBMISSION_CAP = 2000;           // §C "first visit pages up to 2,000-cap"
 
 // ---------------------------------------------------------------------------

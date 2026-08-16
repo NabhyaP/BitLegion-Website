@@ -159,3 +159,33 @@ export async function branchForCourseCode(
   );
   return rows[0] ? (rows[0].branch as string) : null;
 }
+
+/**
+ * Search users by name or email (admin user-picker, §B4 teams).
+ * Returns only ACTIVE + PENDING users. Max 20 results.
+ */
+export async function searchUsers(
+  q: string,
+  db: Db = defaultPool,
+): Promise<{ id: number; displayName: string; collegeEmail: string; avatarUrl: string | null; cfHandle: string | null }[]> {
+  const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT u.id, u.display_name, u.college_email, u.avatar_url,
+            ca.handle AS cf_handle
+       FROM users u
+       LEFT JOIN codeforces_accounts ca
+              ON ca.user_id = u.id AND ca.status = 'ACTIVE'
+      WHERE u.status IN ('ACTIVE', 'PENDING')
+        AND (u.display_name LIKE ? OR u.college_email LIKE ?)
+      ORDER BY u.display_name ASC
+      LIMIT 20`,
+    [like, like],
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    displayName: r.display_name as string,
+    collegeEmail: r.college_email as string,
+    avatarUrl: (r.avatar_url as string | null) ?? null,
+    cfHandle: (r.cf_handle as string | null) ?? null,
+  }));
+}

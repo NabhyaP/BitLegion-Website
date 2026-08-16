@@ -13,7 +13,7 @@ import { sessionMiddleware } from './middleware/session.ts';
 import { csrfProtection, csrfTokenHandler } from './middleware/csrf.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
 import { authRouter } from './modules/auth/router.ts';
-import { meRouter } from './modules/users/router.ts';
+import { meRouter, adminUsersRouter } from './modules/users/router.ts';
 import { cfLinksRouter } from './modules/codeforces-links/router.ts';
 import { leaderboardRouter } from './modules/leaderboards/router.ts';
 import { settingsPublicRouter, settingsAdminRouter } from './modules/settings/router.ts';
@@ -106,6 +106,7 @@ export function createApp() {
   // Admin surface
   app.use('/api/v1/admin/settings',   adminLimiter, settingsAdminRouter);
   app.use('/api/v1/admin/teams',      adminLimiter, teamsAdminRouter);
+  app.use('/api/v1/admin/users',      adminLimiter, adminUsersRouter);
   app.use('/api/v1/admin',            adminLimiter, adminRouter);
 
   // 404 for unknown /api routes
