@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import AsciiIntro from '@/components/AsciiIntro.vue';
+import AsciiLogo from '@/components/AsciiLogo.vue';
 import { useSessionStore } from '@/stores/session.ts';
 
 const session = useSessionStore();
@@ -31,14 +32,18 @@ function introDone() {
     </header>
 
     <section class="hero">
-      <p class="eyebrow">IIIT Pune — competitive programming club</p>
-      <h1>Compete.<br />Climb.<br />Repeat.</h1>
-      <p class="sub">
-        Codeforces ratings, team standings and solve counts for the legion, synced automatically.
-      </p>
-      <RouterLink class="cta" :to="session.signedIn ? '/dashboard' : '/login'">
-        {{ session.signedIn ? 'Open dashboard' : 'Sign in with college account' }} →
-      </RouterLink>
+      <div class="copy">
+        <p class="eyebrow">IIIT Pune — competitive programming club</p>
+        <h1>Compete.<br />Climb.<br />Repeat.</h1>
+        <p class="sub">
+          Codeforces ratings, team standings and solve counts for the legion, synced automatically.
+        </p>
+        <RouterLink class="cta" :to="session.signedIn ? '/dashboard' : '/login'">
+          {{ session.signedIn ? 'Open dashboard' : 'Sign in with college account' }} →
+        </RouterLink>
+      </div>
+
+      <AsciiLogo class="logo" />
     </section>
 
     <footer>
@@ -89,10 +94,25 @@ a:focus-visible {
 .hero {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  max-width: 46rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(2rem, 6vw, 5rem);
   padding: 4rem 0;
+}
+.copy {
+  max-width: 34rem;
+}
+.logo {
+  flex: none;
+  /* Explicit width: AsciiLogo measures its own clientWidth to size the grid. */
+  width: clamp(300px, 34vw, 520px);
+}
+/* Single column on narrow screens — the art drops below the copy. */
+@media (max-width: 56rem) {
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .eyebrow {
   font-size: 0.75rem;
