@@ -142,6 +142,8 @@ const memberForm = reactive({
 
 const memberSaving = ref(false);
 const memberError = ref<string | null>(null);
+/** Set by the preview <img> @error — flags a photo URL that does not resolve. */
+const photoBroken = ref(false);
 
 function openAddMember(t: TeamResponse) {
   memberModal.value = { mode: 'add', teamId: t.id, teamName: t.name };
@@ -151,6 +153,7 @@ function openAddMember(t: TeamResponse) {
   memberForm.name = memberForm.roleTitle = memberForm.cfHandle = memberForm.photoUrl = '';
   memberForm.displayOrder = '0';
   memberError.value = null;
+  photoBroken.value = false;
 }
 
 function openEditMember(team: TeamResponse, m: TeamMemberResponse) {
@@ -166,14 +169,18 @@ function openEditMember(team: TeamResponse, m: TeamMemberResponse) {
   memberForm.photoUrl = m.photoUrl ?? '';
   memberForm.displayOrder = String(m.displayOrder);
   memberError.value = null;
+  photoBroken.value = false;
 }
 
-/** Pick a registered user — auto-fill form fields from their profile. */
+/**
+ * Pick a registered user — auto-fill name and CF handle.
+ * Photo is deliberately NOT prefilled from the account's Google avatar: team photos are
+ * chosen by admins, not inherited from whatever picture someone uses on Google.
+ */
 function selectUser(u: UserResult) {
   linkedUser.value = u;
   memberForm.name = u.displayName;
   memberForm.cfHandle = u.cfHandle ?? '';
-  memberForm.photoUrl = u.avatarUrl ?? '';
   clearUserSearch();
 }
 
@@ -181,7 +188,7 @@ function clearLinkedUser() {
   linkedUser.value = null;
   memberForm.name = '';
   memberForm.cfHandle = '';
-  memberForm.photoUrl = '';
+  // photoUrl is left alone — it is admin-entered, not derived from the linked account.
 }
 
 async function doSaveMember() {
@@ -237,35 +244,35 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
       <h1 style="margin:0;font-size:1.3rem">Teams</h1>
       <button
-        style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer"
+        style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer"
         @click="addTeamOpen = true"
       >+ Add team</button>
     </div>
 
-    <div v-if="loading && !teams.length" style="padding:2rem;text-align:center;color:#94a3b8">Loading…</div>
-    <div v-if="loadError" role="alert" style="background:#fee2e2;border-radius:4px;padding:0.75rem;margin-bottom:1rem">{{ loadError }}</div>
-    <div v-if="!loading && !teams.length" style="color:#94a3b8;padding:2rem;text-align:center">No teams yet.</div>
+    <div v-if="loading && !teams.length" style="padding:2rem;text-align:center;color:var(--muted)">Loading…</div>
+    <div v-if="loadError" role="alert" style="background:var(--danger-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem">{{ loadError }}</div>
+    <div v-if="!loading && !teams.length" style="color:var(--muted);padding:2rem;text-align:center">No teams yet.</div>
 
     <!-- Teams list -->
     <div
       v-for="team in teams" :key="team.id"
-      style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:1rem;margin-bottom:1.25rem"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem;margin-bottom:1.25rem"
     >
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.4rem">
         <div>
           <span style="font-weight:600;font-size:0.95rem">{{ team.name }}</span>
-          <span style="font-size:0.75rem;color:#94a3b8;margin-left:0.5rem">order={{ team.displayOrder }}</span>
+          <span style="font-size:0.75rem;color:var(--muted);margin-left:0.5rem">order={{ team.displayOrder }}</span>
         </div>
         <div style="display:flex;gap:0.5rem">
-          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid #cbd5e1;border-radius:3px" @click="openEditTeam(team)">Edit team</button>
-          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid #6366f1;border-radius:3px;color:#4f46e5" @click="openAddMember(team)">+ Member</button>
-          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid #fca5a5;border-radius:3px;color:#dc2626" @click="doDeleteTeam(team)">Delete</button>
+          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid var(--line);border-radius:3px" @click="openEditTeam(team)">Edit team</button>
+          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid var(--accent);border-radius:3px;color:var(--accent)" @click="openAddMember(team)">+ Member</button>
+          <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid var(--danger);border-radius:3px;color:var(--danger)" @click="doDeleteTeam(team)">Delete</button>
         </div>
       </div>
 
       <table v-if="team.members.length" style="width:100%;border-collapse:collapse;font-size:0.8rem">
         <thead>
-          <tr style="text-align:left;border-bottom:1px solid #e2e8f0">
+          <tr style="text-align:left;border-bottom:1px solid var(--line)">
             <th style="padding:0.4rem" scope="col">Name</th>
             <th style="padding:0.4rem" scope="col">Role</th>
             <th style="padding:0.4rem" scope="col">CF Handle</th>
@@ -275,7 +282,7 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in team.members" :key="m.id" style="border-bottom:1px solid #f1f5f9">
+          <tr v-for="m in team.members" :key="m.id" style="border-bottom:1px solid var(--surface)">
             <td style="padding:0.4rem">
               <span style="display:flex;align-items:center;gap:0.4rem">
                 <img v-if="m.photoUrl" :src="m.photoUrl" :alt="m.name" width="20" height="20"
@@ -283,45 +290,45 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
                 {{ m.name }}
               </span>
             </td>
-            <td style="padding:0.4rem;color:#475569">{{ m.roleTitle }}</td>
-            <td style="padding:0.4rem;color:#475569">{{ m.cfHandle ?? '—' }}</td>
+            <td style="padding:0.4rem;color:var(--muted)">{{ m.roleTitle }}</td>
+            <td style="padding:0.4rem;color:var(--muted)">{{ m.cfHandle ?? '—' }}</td>
             <td style="padding:0.4rem">
               <span v-if="m.userId" title="Linked to a registered account"
-                    style="font-size:0.7rem;background:#dcfce7;color:#166534;padding:0.1rem 0.4rem;border-radius:9999px">✓ account</span>
-              <span v-else style="font-size:0.7rem;color:#94a3b8">manual</span>
+                    style="font-size:0.7rem;background:var(--ok-bg);color:var(--ok);padding:0.1rem 0.4rem;border-radius:9999px">✓ account</span>
+              <span v-else style="font-size:0.7rem;color:var(--muted)">manual</span>
             </td>
-            <td style="padding:0.4rem;color:#94a3b8">{{ m.displayOrder }}</td>
+            <td style="padding:0.4rem;color:var(--muted)">{{ m.displayOrder }}</td>
             <td style="padding:0.4rem;white-space:nowrap">
-              <button style="font-size:0.7rem;cursor:pointer;padding:0.15rem 0.4rem;border:1px solid #cbd5e1;border-radius:3px;margin-right:0.2rem"
+              <button style="font-size:0.7rem;cursor:pointer;padding:0.15rem 0.4rem;border:1px solid var(--line);border-radius:3px;margin-right:0.2rem"
                       @click="openEditMember(team, m)">Edit</button>
-              <button style="font-size:0.7rem;cursor:pointer;padding:0.15rem 0.4rem;border:1px solid #fca5a5;border-radius:3px;color:#dc2626"
+              <button style="font-size:0.7rem;cursor:pointer;padding:0.15rem 0.4rem;border:1px solid var(--danger);border-radius:3px;color:var(--danger)"
                       @click="doDeleteMember(team.id, m)">Remove</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <p v-else style="font-size:0.8rem;color:#94a3b8;margin:0">No members yet.</p>
+      <p v-else style="font-size:0.8rem;color:var(--muted);margin:0">No members yet.</p>
     </div>
 
     <!-- ── Add team modal ───────────────────────────────────────────────── -->
     <div v-if="addTeamOpen" role="dialog" aria-modal="true" aria-labelledby="add-team-title"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
         <h2 id="add-team-title" style="font-size:1rem;margin:0 0 1rem">Add Team</h2>
         <form @submit.prevent="doAddTeam" style="display:grid;gap:0.75rem">
           <label style="font-size:0.85rem">Team name *
             <input v-model="addTeamForm.name" required
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Display order
             <input v-model="addTeamForm.displayOrder" type="number"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
-          <div v-if="addTeamError" role="alert" style="color:#dc2626;font-size:0.8rem">{{ addTeamError }}</div>
+          <div v-if="addTeamError" role="alert" style="color:var(--danger);font-size:0.8rem">{{ addTeamError }}</div>
           <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer" @click="addTeamOpen=false">Cancel</button>
+            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer" @click="addTeamOpen=false">Cancel</button>
             <button type="submit" :disabled="addTeamSaving"
-                    style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer">
+                    style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
               {{ addTeamSaving ? 'Adding…' : 'Add' }}
             </button>
           </div>
@@ -332,22 +339,22 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
     <!-- ── Edit team modal ──────────────────────────────────────────────── -->
     <div v-if="editTeam" role="dialog" aria-modal="true" aria-labelledby="edit-team-title"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
         <h2 id="edit-team-title" style="font-size:1rem;margin:0 0 1rem">Edit Team</h2>
         <form @submit.prevent="doEditTeam" style="display:grid;gap:0.75rem">
           <label style="font-size:0.85rem">Team name *
             <input v-model="editTeamForm.name" required
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Display order
             <input v-model="editTeamForm.displayOrder" type="number"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
-          <div v-if="editTeamError" role="alert" style="color:#dc2626;font-size:0.8rem">{{ editTeamError }}</div>
+          <div v-if="editTeamError" role="alert" style="color:var(--danger);font-size:0.8rem">{{ editTeamError }}</div>
           <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer" @click="editTeam=null">Cancel</button>
+            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer" @click="editTeam=null">Cancel</button>
             <button type="submit" :disabled="editTeamSaving"
-                    style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer">
+                    style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
               {{ editTeamSaving ? 'Saving…' : 'Save' }}
             </button>
           </div>
@@ -358,28 +365,28 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
     <!-- ── Add / Edit member modal ──────────────────────────────────────── -->
     <div v-if="memberModal" role="dialog" aria-modal="true" aria-labelledby="member-modal-title"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:440px;max-height:90vh;overflow-y:auto">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:440px;max-height:90vh;overflow-y:auto">
 
         <h2 id="member-modal-title" style="font-size:1rem;margin:0 0 1rem">
           {{ memberModal.mode === 'add' ? `Add Member — ${memberModal.teamName}` : 'Edit Member' }}
         </h2>
 
         <!-- Tab bar -->
-        <div style="display:flex;border-bottom:2px solid #e2e8f0;margin-bottom:1rem">
+        <div style="display:flex;border-bottom:2px solid var(--line);margin-bottom:1rem">
           <button
             type="button"
             :style="{
               padding: '0.4rem 0.9rem',
               fontWeight: memberTab === 'account' ? '600' : '400',
-              borderBottom: memberTab === 'account' ? '2px solid #4f46e5' : '2px solid transparent',
+              borderBottom: memberTab === 'account' ? '2px solid var(--accent)' : '2px solid transparent',
               marginBottom: '-2px',
               background: 'none',
               border: 'none',
               borderBottomWidth: '2px',
               borderBottomStyle: 'solid',
-              borderBottomColor: memberTab === 'account' ? '#4f46e5' : 'transparent',
+              borderBottomColor: memberTab === 'account' ? 'var(--accent)' : 'transparent',
               cursor: 'pointer',
-              color: memberTab === 'account' ? '#4f46e5' : '#64748b',
+              color: memberTab === 'account' ? 'var(--accent)' : 'var(--muted)',
               fontSize: '0.85rem',
             }"
             @click="memberTab = 'account'"
@@ -393,10 +400,10 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
               border: 'none',
               borderBottomWidth: '2px',
               borderBottomStyle: 'solid',
-              borderBottomColor: memberTab === 'manual' ? '#4f46e5' : 'transparent',
+              borderBottomColor: memberTab === 'manual' ? 'var(--accent)' : 'transparent',
               marginBottom: '-2px',
               cursor: 'pointer',
-              color: memberTab === 'manual' ? '#4f46e5' : '#64748b',
+              color: memberTab === 'manual' ? 'var(--accent)' : 'var(--muted)',
               fontSize: '0.85rem',
             }"
             @click="memberTab = 'manual'"
@@ -409,16 +416,16 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
           <template v-if="memberTab === 'account'">
             <!-- Already picked a user -->
             <div v-if="linkedUser"
-                 style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px">
+                 style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem;background:var(--ok-bg);border:1px solid var(--ok-bg);border-radius:6px">
               <img v-if="linkedUser.avatarUrl" :src="linkedUser.avatarUrl" :alt="linkedUser.displayName"
                    width="36" height="36" style="border-radius:50%;object-fit:cover;flex-shrink:0" />
               <div style="flex:1;min-width:0">
                 <div style="font-weight:600;font-size:0.875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser.displayName }}</div>
-                <div style="font-size:0.75rem;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser.collegeEmail }}</div>
-                <div v-if="linkedUser.cfHandle" style="font-size:0.75rem;color:#6366f1">CF: {{ linkedUser.cfHandle }}</div>
+                <div style="font-size:0.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser.collegeEmail }}</div>
+                <div v-if="linkedUser.cfHandle" style="font-size:0.75rem;color:var(--accent)">CF: {{ linkedUser.cfHandle }}</div>
               </div>
               <button type="button"
-                      style="font-size:0.75rem;color:#dc2626;cursor:pointer;background:none;border:none;padding:0.2rem"
+                      style="font-size:0.75rem;color:var(--danger);cursor:pointer;background:none;border:none;padding:0.2rem"
                       aria-label="Remove linked account"
                       @click="clearLinkedUser">✕</button>
             </div>
@@ -432,12 +439,12 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
                     type="search"
                     placeholder="Start typing…"
                     autocomplete="off"
-                    style="display:block;width:100%;padding:0.4rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box;font-size:0.875rem"
+                    style="display:block;width:100%;padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box;font-size:0.875rem"
                     aria-label="Search registered users"
                     aria-autocomplete="list"
                     :aria-expanded="userResults.length > 0"
                   />
-                  <div v-if="userSearching" style="position:absolute;right:0.5rem;top:50%;transform:translateY(-25%);font-size:0.75rem;color:#94a3b8">
+                  <div v-if="userSearching" style="position:absolute;right:0.5rem;top:50%;transform:translateY(-25%);font-size:0.75rem;color:var(--muted)">
                     …
                   </div>
                 </div>
@@ -445,42 +452,42 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
 
               <!-- Results dropdown -->
               <ul v-if="userResults.length"
-                  style="list-style:none;margin:0;padding:0;border:1px solid #e2e8f0;border-radius:4px;max-height:180px;overflow-y:auto"
+                  style="list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:4px;max-height:180px;overflow-y:auto"
                   role="listbox">
                 <li
                   v-for="u in userResults" :key="u.id"
                   role="option"
-                  style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0.75rem;cursor:pointer;border-bottom:1px solid #f1f5f9"
+                  style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0.75rem;cursor:pointer;border-bottom:1px solid var(--surface)"
                   @click="selectUser(u)"
                   @keydown.enter="selectUser(u)"
                   tabindex="0"
                 >
                   <img v-if="u.avatarUrl" :src="u.avatarUrl" :alt="u.displayName"
                        width="28" height="28" style="border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy" />
-                  <div v-else style="width:28px;height:28px;border-radius:50%;background:#e2e8f0;flex-shrink:0"></div>
+                  <div v-else style="width:28px;height:28px;border-radius:50%;background:var(--line);flex-shrink:0"></div>
                   <div style="flex:1;min-width:0">
                     <div style="font-size:0.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.displayName }}</div>
-                    <div style="font-size:0.7rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.collegeEmail }}</div>
+                    <div style="font-size:0.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.collegeEmail }}</div>
                   </div>
-                  <span v-if="u.cfHandle" style="font-size:0.7rem;color:#6366f1;white-space:nowrap">{{ u.cfHandle }}</span>
+                  <span v-if="u.cfHandle" style="font-size:0.7rem;color:var(--accent);white-space:nowrap">{{ u.cfHandle }}</span>
                 </li>
               </ul>
 
               <p v-if="userSearch && !userSearching && userResults.length === 0"
-                 style="font-size:0.8rem;color:#94a3b8;margin:0">
+                 style="font-size:0.8rem;color:var(--muted);margin:0">
                 No matching accounts found.
-                <button type="button" style="font-size:0.8rem;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0" @click="memberTab='manual'">Switch to manual entry →</button>
+                <button type="button" style="font-size:0.8rem;color:var(--accent);background:none;border:none;cursor:pointer;padding:0" @click="memberTab='manual'">Switch to manual entry →</button>
               </p>
 
-              <p style="font-size:0.75rem;color:#94a3b8;margin:0">
-                Can't find them? <button type="button" style="font-size:0.75rem;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0" @click="memberTab='manual'">Enter details manually</button>
+              <p style="font-size:0.75rem;color:var(--muted);margin:0">
+                Can't find them? <button type="button" style="font-size:0.75rem;color:var(--accent);background:none;border:none;cursor:pointer;padding:0" @click="memberTab='manual'">Enter details manually</button>
               </p>
             </template>
           </template>
 
           <!-- ── Manual tab ──────────────────────────────────────────── -->
           <template v-else>
-            <p style="font-size:0.75rem;color:#64748b;margin:0;padding:0.4rem 0.6rem;background:#f8fafc;border-radius:4px;border:1px solid #e2e8f0">
+            <p style="font-size:0.75rem;color:var(--muted);margin:0;padding:0.4rem 0.6rem;background:var(--surface);border-radius:4px;border:1px solid var(--line)">
               No account linked. Details won't auto-update if the user changes their profile.
             </p>
           </template>
@@ -489,37 +496,53 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
           <label style="font-size:0.85rem">Name *
             <input v-model="memberForm.name" required
                    :placeholder="memberTab === 'account' && linkedUser ? linkedUser.displayName : 'Full name'"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Role title *
             <input v-model="memberForm.roleTitle" required placeholder="e.g. President, Developer…"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">CF handle
             <input v-model="memberForm.cfHandle" placeholder="Codeforces username (optional)"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
             <span v-if="memberTab === 'account' && linkedUser?.cfHandle && !memberForm.cfHandle"
-                  style="font-size:0.75rem;color:#f59e0b">
+                  style="font-size:0.75rem;color:var(--warn)">
               Linked account has no CF handle linked yet.
             </span>
           </label>
           <label style="font-size:0.85rem">Photo URL
             <input v-model="memberForm.photoUrl" type="url" placeholder="https://… (optional)"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+            <!-- Preview: a broken or wrong URL is otherwise only discovered on the public page. -->
+            <span style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem">
+              <span style="width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--line);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <img v-if="memberForm.photoUrl" :src="memberForm.photoUrl" alt=""
+                     width="40" height="40" style="object-fit:cover;width:100%;height:100%"
+                     @error="photoBroken = true" @load="photoBroken = false" />
+                <span v-else style="font-size:1.1rem;color:var(--muted)" aria-hidden="true">👤</span>
+              </span>
+              <span style="font-size:0.75rem;color:var(--muted)">
+                <template v-if="memberForm.photoUrl && photoBroken">
+                  <span style="color:var(--danger)">Image failed to load — check the URL.</span>
+                </template>
+                <template v-else-if="!memberForm.photoUrl">No photo — a placeholder is shown.</template>
+                <template v-else>Preview</template>
+              </span>
+            </span>
           </label>
           <label style="font-size:0.85rem">Display order
             <input v-model="memberForm.displayOrder" type="number"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
 
-          <div v-if="memberError" role="alert" style="color:#dc2626;font-size:0.8rem">{{ memberError }}</div>
+          <div v-if="memberError" role="alert" style="color:var(--danger);font-size:0.8rem">{{ memberError }}</div>
 
           <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer" @click="memberModal=null">Cancel</button>
+            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer" @click="memberModal=null">Cancel</button>
             <button
               type="submit"
               :disabled="memberSaving || (memberTab === 'account' && !linkedUser && !memberForm.name)"
-              style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer;disabled:opacity-50"
+              style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer;disabled:opacity-50"
             >
               {{ memberSaving ? 'Saving…' : memberModal.mode === 'add' ? 'Add' : 'Save' }}
             </button>

@@ -208,9 +208,9 @@ function fmtDate(iso: string) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:0.5rem">
       <h1 style="margin:0;font-size:1.3rem">Members</h1>
       <div style="display:flex;gap:0.5rem">
-        <button style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer"
+        <button style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer"
                 @click="addOpen=true">+ Add member</button>
-        <button style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+        <button style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                 @click="csvOpen=true">CSV import</button>
       </div>
     </div>
@@ -218,30 +218,30 @@ function fmtDate(iso: string) {
     <!-- Filters -->
     <div style="display:flex;flex-wrap:wrap;gap:0.6rem;margin-bottom:1rem;align-items:flex-end">
       <div>
-        <label for="m-q" style="display:block;font-size:0.75rem;color:#475569;margin-bottom:0.2rem">Search</label>
+        <label for="m-q" style="display:block;font-size:0.75rem;color:var(--muted);margin-bottom:0.2rem">Search</label>
         <input id="m-q" v-model="filters.q" type="search" placeholder="Name / email / handle"
-               style="padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem;width:200px" />
+               style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem;width:200px" />
       </div>
       <div>
-        <label for="m-status" style="display:block;font-size:0.75rem;color:#475569;margin-bottom:0.2rem">Status</label>
+        <label for="m-status" style="display:block;font-size:0.75rem;color:var(--muted);margin-bottom:0.2rem">Status</label>
         <select id="m-status" v-model="filters.status"
-                style="padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem">
+                style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem">
           <option value="">All</option>
           <option v-for="s in STATUSES" :key="s" :value="s">{{ s }}</option>
         </select>
       </div>
       <div>
-        <label for="m-branch" style="display:block;font-size:0.75rem;color:#475569;margin-bottom:0.2rem">Branch</label>
+        <label for="m-branch" style="display:block;font-size:0.75rem;color:var(--muted);margin-bottom:0.2rem">Branch</label>
         <select id="m-branch" v-model="filters.branch"
-                style="padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem">
+                style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem">
           <option value="">All</option>
           <option v-for="b in BRANCHES" :key="b" :value="b">{{ b }}</option>
         </select>
       </div>
       <div>
-        <label for="m-year" style="display:block;font-size:0.75rem;color:#475569;margin-bottom:0.2rem">Batch</label>
+        <label for="m-year" style="display:block;font-size:0.75rem;color:var(--muted);margin-bottom:0.2rem">Batch</label>
         <select id="m-year" v-model="filters.year"
-                style="padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem">
+                style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem">
           <option :value="undefined">All</option>
           <option v-for="y in batchYears" :key="y" :value="y">{{ y }}</option>
         </select>
@@ -249,14 +249,14 @@ function fmtDate(iso: string) {
     </div>
 
     <!-- Error / loading -->
-    <div v-if="error" role="alert" style="background:#fee2e2;border-radius:4px;padding:0.75rem;margin-bottom:1rem;font-size:0.9rem">{{ error }}</div>
-    <div v-if="loading && !members.length" role="status" style="padding:2rem;text-align:center;color:#94a3b8">Loading…</div>
+    <div v-if="error" role="alert" style="background:var(--danger-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem;font-size:0.9rem">{{ error }}</div>
+    <div v-if="loading && !members.length" role="status" style="padding:2rem;text-align:center;color:var(--muted)">Loading…</div>
 
     <!-- Table -->
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:0.8rem" aria-label="Members">
         <thead>
-          <tr style="border-bottom:2px solid #e2e8f0;text-align:left;background:#f8fafc">
+          <tr style="border-bottom:2px solid var(--line);text-align:left;background:var(--surface)">
             <th style="padding:0.5rem" scope="col">Name</th>
             <th style="padding:0.5rem" scope="col">Email</th>
             <th style="padding:0.5rem" scope="col">Batch</th>
@@ -269,38 +269,38 @@ function fmtDate(iso: string) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in members" :key="m.id" style="border-bottom:1px solid #f1f5f9">
+          <tr v-for="m in members" :key="m.id" style="border-bottom:1px solid var(--surface)">
             <td style="padding:0.5rem;font-weight:500">{{ m.displayName }}</td>
-            <td style="padding:0.5rem;color:#475569;font-size:0.75rem">{{ m.collegeEmail }}</td>
-            <td style="padding:0.5rem;color:#64748b">{{ m.batchYear ?? '—' }}</td>
-            <td style="padding:0.5rem;color:#64748b">{{ m.branch ?? '—' }}</td>
+            <td style="padding:0.5rem;color:var(--muted);font-size:0.75rem">{{ m.collegeEmail }}</td>
+            <td style="padding:0.5rem;color:var(--muted)">{{ m.batchYear ?? '—' }}</td>
+            <td style="padding:0.5rem;color:var(--muted)">{{ m.branch ?? '—' }}</td>
             <td style="padding:0.5rem">
               <span :style="{
                 padding:'0.15rem 0.5rem',borderRadius:'10px',fontSize:'0.7rem',fontWeight:600,
-                background: m.status==='ACTIVE'?'#dcfce7':m.status==='PENDING'?'#fef3c7':m.status==='SUSPENDED'?'#fee2e2':'#f1f5f9',
-                color: m.status==='ACTIVE'?'#16a34a':m.status==='PENDING'?'#d97706':m.status==='SUSPENDED'?'#dc2626':'#475569'
+                background: m.status==='ACTIVE'?'var(--ok-bg)':m.status==='PENDING'?'var(--warn-bg)':m.status==='SUSPENDED'?'var(--danger-bg)':'var(--surface)',
+                color: m.status==='ACTIVE'?'var(--ok)':m.status==='PENDING'?'var(--warn)':m.status==='SUSPENDED'?'var(--danger)':'var(--muted)'
               }">{{ m.status }}</span>
             </td>
             <td style="padding:0.5rem">
               <span v-if="m.cfHandle" style="font-size:0.75rem">
                 {{ m.cfHandle }}
-                <button style="font-size:0.7rem;color:#dc2626;cursor:pointer;background:none;border:none;padding:0 0.2rem"
+                <button style="font-size:0.7rem;color:var(--danger);cursor:pointer;background:none;border:none;padding:0 0.2rem"
                         :disabled="clearingLink===m.id"
                         @click="doClearLink(m.id)">✕</button>
               </span>
-              <span v-else style="color:#94a3b8;font-size:0.75rem">—</span>
+              <span v-else style="color:var(--muted);font-size:0.75rem">—</span>
             </td>
-            <td style="padding:0.5rem;font-size:0.7rem;color:#475569">
+            <td style="padding:0.5rem;font-size:0.7rem;color:var(--muted)">
               {{ m.roles.filter(r=>r!=='MEMBER').join(', ') || 'MEMBER' }}
             </td>
             <td style="padding:0.5rem;text-align:center">
-              <span v-if="m.showInLeaderboard" style="color:#16a34a" title="Shown in leaderboard">✓</span>
-              <span v-else style="color:#dc2626" title="Hidden from leaderboard">✕</span>
+              <span v-if="m.showInLeaderboard" style="color:var(--ok)" title="Shown in leaderboard">✓</span>
+              <span v-else style="color:var(--danger)" title="Hidden from leaderboard">✕</span>
             </td>
             <td style="padding:0.5rem;white-space:nowrap">
-              <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid #cbd5e1;border-radius:3px;margin-right:0.25rem"
+              <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid var(--line);border-radius:3px;margin-right:0.25rem"
                       @click="openEdit(m)">Edit</button>
-              <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid #cbd5e1;border-radius:3px"
+              <button style="font-size:0.75rem;cursor:pointer;padding:0.2rem 0.5rem;border:1px solid var(--line);border-radius:3px"
                       @click="openRoles(m)">Roles</button>
             </td>
           </tr>
@@ -309,13 +309,13 @@ function fmtDate(iso: string) {
     </div>
 
     <!-- Pagination -->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;font-size:0.8rem;color:#64748b">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;font-size:0.8rem;color:var(--muted)">
       <span>{{ total }} members total</span>
       <div style="display:flex;gap:0.5rem">
-        <button :disabled="filters.page <= 1" style="padding:0.25rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;disabled:opacity-50"
+        <button :disabled="filters.page <= 1" style="padding:0.25rem 0.6rem;border:1px solid var(--line);border-radius:4px;cursor:pointer;disabled:opacity-50"
                 @click="filters.page--;load()">← Prev</button>
         <span style="align-self:center">Page {{ filters.page }} / {{ pages }}</span>
-        <button :disabled="filters.page >= pages" style="padding:0.25rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+        <button :disabled="filters.page >= pages" style="padding:0.25rem 0.6rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                 @click="filters.page++;load()">Next →</button>
       </div>
     </div>
@@ -323,29 +323,29 @@ function fmtDate(iso: string) {
     <!-- ── Edit modal ── -->
     <div v-if="editing" role="dialog" aria-modal="true" aria-label="Edit member"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:420px;max-height:90vh;overflow-y:auto">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:420px;max-height:90vh;overflow-y:auto">
         <h2 style="font-size:1rem;margin:0 0 1rem">Edit: {{ editing.displayName }}</h2>
         <form @submit.prevent="saveEdit" style="display:grid;gap:0.75rem">
           <label style="font-size:0.85rem">Display name
             <input v-model="editForm.displayName" maxlength="100" required
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Roll no
             <input v-model="editForm.rollNo" maxlength="20"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Batch year
             <input v-model="editForm.batchYear" type="number" min="2000" max="2100"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Branch
-            <select v-model="editForm.branch" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem">
+            <select v-model="editForm.branch" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem">
               <option value="">—</option>
               <option v-for="b in BRANCHES" :key="b" :value="b">{{ b }}</option>
             </select>
           </label>
           <label style="font-size:0.85rem">Status
-            <select v-model="editForm.status" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem">
+            <select v-model="editForm.status" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem">
               <option v-for="s in STATUSES" :key="s" :value="s">{{ s }}</option>
             </select>
           </label>
@@ -353,12 +353,12 @@ function fmtDate(iso: string) {
             <input v-model="editForm.showInLeaderboard" type="checkbox" />
             Show in leaderboard
           </label>
-          <div v-if="editError" role="alert" style="color:#dc2626;font-size:0.8rem">{{ editError }}</div>
+          <div v-if="editError" role="alert" style="color:var(--danger);font-size:0.8rem">{{ editError }}</div>
           <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                     @click="editing=null">Cancel</button>
             <button type="submit" :disabled="editSaving"
-                    style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer">
+                    style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
               {{ editSaving ? 'Saving…' : 'Save' }}
             </button>
           </div>
@@ -369,7 +369,7 @@ function fmtDate(iso: string) {
     <!-- ── Roles modal ── -->
     <div v-if="rolesTarget" role="dialog" aria-modal="true" aria-label="Manage roles"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:360px">
         <h2 style="font-size:1rem;margin:0 0 1rem">Roles: {{ rolesTarget.displayName }}</h2>
         <div style="display:grid;gap:0.5rem;margin-bottom:1rem">
           <label v-for="r in ALL_ROLES" :key="r" style="display:flex;align-items:center;gap:0.6rem;font-size:0.875rem">
@@ -377,12 +377,12 @@ function fmtDate(iso: string) {
             {{ r }}
           </label>
         </div>
-        <div v-if="rolesError" role="alert" style="color:#dc2626;font-size:0.8rem;margin-bottom:0.75rem">{{ rolesError }}</div>
+        <div v-if="rolesError" role="alert" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.75rem">{{ rolesError }}</div>
         <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-          <button style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+          <button style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                   @click="rolesTarget=null">Cancel</button>
           <button :disabled="rolesSaving"
-                  style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer"
+                  style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer"
                   @click="saveRoles">
             {{ rolesSaving ? 'Saving…' : 'Save roles' }}
           </button>
@@ -393,33 +393,33 @@ function fmtDate(iso: string) {
     <!-- ── Add member modal ── -->
     <div v-if="addOpen" role="dialog" aria-modal="true" aria-label="Add member"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:400px">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:400px">
         <h2 style="font-size:1rem;margin:0 0 1rem">Add pre-provisioned member</h2>
         <form @submit.prevent="doAdd" style="display:grid;gap:0.75rem">
           <label style="font-size:0.85rem">College email *
             <input v-model="addForm.collegeEmail" type="email" required
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Display name *
             <input v-model="addForm.displayName" required maxlength="100"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Batch year
             <input v-model="addForm.batchYear" type="number" min="2000" max="2100"
-                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
           <label style="font-size:0.85rem">Branch
-            <select v-model="addForm.branch" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;margin-top:0.2rem">
+            <select v-model="addForm.branch" style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem">
               <option value="">—</option>
               <option v-for="b in BRANCHES" :key="b" :value="b">{{ b }}</option>
             </select>
           </label>
-          <div v-if="addError" role="alert" style="color:#dc2626;font-size:0.8rem">{{ addError }}</div>
+          <div v-if="addError" role="alert" style="color:var(--danger);font-size:0.8rem">{{ addError }}</div>
           <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+            <button type="button" style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                     @click="addOpen=false">Cancel</button>
             <button type="submit" :disabled="addSaving"
-                    style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer">
+                    style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
               {{ addSaving ? 'Adding…' : 'Add member' }}
             </button>
           </div>
@@ -430,23 +430,23 @@ function fmtDate(iso: string) {
     <!-- ── CSV import modal ── -->
     <div v-if="csvOpen" role="dialog" aria-modal="true" aria-label="CSV import"
          style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100">
-      <div style="background:#fff;border-radius:8px;padding:1.5rem;width:100%;max-width:560px;max-height:90vh;overflow-y:auto">
+      <div style="background:var(--surface);border-radius:8px;padding:1.5rem;width:100%;max-width:560px;max-height:90vh;overflow-y:auto">
         <h2 style="font-size:1rem;margin:0 0 0.75rem">CSV Import</h2>
-        <p style="font-size:0.8rem;color:#64748b;margin:0 0 0.75rem">
+        <p style="font-size:0.8rem;color:var(--muted);margin:0 0 0.75rem">
           CSV format: <code>display_name,college_email,batch_year,branch</code><br/>
           First row is the header. Max 2,000 rows. Existing emails are skipped.
         </p>
         <textarea v-model="csvText" rows="8"
                   placeholder="display_name,college_email,batch_year,branch&#10;Alice,alice@cse.iiitp.ac.in,2024,CSE"
-                  style="width:100%;padding:0.5rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.8rem;font-family:monospace;box-sizing:border-box"></textarea>
-        <div v-if="csvError" role="alert" style="color:#dc2626;font-size:0.8rem;margin-top:0.5rem">{{ csvError }}</div>
+                  style="width:100%;padding:0.5rem;border:1px solid var(--line);border-radius:4px;font-size:0.8rem;font-family:monospace;box-sizing:border-box"></textarea>
+        <div v-if="csvError" role="alert" style="color:var(--danger);font-size:0.8rem;margin-top:0.5rem">{{ csvError }}</div>
 
         <!-- Result report -->
         <div v-if="csvResult" style="margin-top:0.75rem;font-size:0.85rem">
-          <div style="color:#16a34a">✓ Imported: {{ csvResult.imported }}</div>
-          <div style="color:#d97706">Skipped (duplicate): {{ csvResult.skipped }}</div>
+          <div style="color:var(--ok)">✓ Imported: {{ csvResult.imported }}</div>
+          <div style="color:var(--warn)">Skipped (duplicate): {{ csvResult.skipped }}</div>
           <div v-if="csvResult.errors.length" style="margin-top:0.5rem">
-            <div style="color:#dc2626;font-weight:600">Errors ({{ csvResult.errors.length }}):</div>
+            <div style="color:var(--danger);font-weight:600">Errors ({{ csvResult.errors.length }}):</div>
             <ul style="margin:0.25rem 0 0;padding-left:1.25rem;font-size:0.75rem;max-height:8rem;overflow-y:auto">
               <li v-for="e in csvResult.errors" :key="e.row">Row {{ e.row }} ({{ e.email }}): {{ e.reason }}</li>
             </ul>
@@ -454,10 +454,10 @@ function fmtDate(iso: string) {
         </div>
 
         <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
-          <button style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+          <button style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                   @click="csvOpen=false;csvResult=null;csvText=''">Close</button>
           <button :disabled="csvSaving || !csvText.trim()"
-                  style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer"
+                  style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer"
                   @click="doImport">
             {{ csvSaving ? 'Importing…' : 'Import' }}
           </button>

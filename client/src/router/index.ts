@@ -21,7 +21,7 @@ export const router = createRouter({
     // Auth required — lazy (§B4 route-level code splitting)
     {
       path: '/',
-      redirect: '/dashboard',
+      component: () => import('@/pages/Landing.vue'),
     },
     {
       path: '/onboarding',

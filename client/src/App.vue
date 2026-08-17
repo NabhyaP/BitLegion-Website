@@ -26,7 +26,7 @@ const { data: settings } = useQuery({
       v-if="settings?.announcement"
       role="status"
       aria-live="polite"
-      style="background:#1e40af;color:#fff;text-align:center;padding:0.5rem 1rem;font-size:0.9rem"
+      style="background:var(--surface-2);color:var(--text);border-bottom:1px solid var(--line);text-align:center;padding:0.5rem 1rem;font-size:0.85rem"
     >
       {{ settings.announcement }}
     </div>

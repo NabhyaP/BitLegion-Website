@@ -95,99 +95,99 @@ async function handleLogout() {
     </header>
 
     <!-- Account section -->
-    <section style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:1.5rem;margin-bottom:1.5rem">
+    <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1.5rem;margin-bottom:1.5rem">
       <h2 style="font-size:1rem;margin:0 0 1rem">Account</h2>
 
-      <div style="font-size:0.9rem;margin-bottom:0.75rem;color:#475569">
+      <div style="font-size:0.9rem;margin-bottom:0.75rem;color:var(--muted)">
         <strong>Email:</strong> {{ session.me?.collegeEmail ?? '—' }}
       </div>
 
       <!-- Display name -->
       <div style="font-size:0.9rem;margin-bottom:0.75rem">
         <strong>Display name:</strong>
-        <span v-if="!editing" style="margin-left:0.4rem">{{ session.me?.displayName }}</span>
+        <span style="margin-left:0.4rem">{{ session.me?.displayName }}</span>
         <!-- <button v-if="!editing"
-                style="margin-left:0.75rem;font-size:0.8rem;cursor:pointer;padding:0.2rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px"
+                style="margin-left:0.75rem;font-size:0.8rem;cursor:pointer;padding:0.2rem 0.6rem;border:1px solid var(--line);border-radius:4px"
                 @click="startEdit">Edit</button>
         <form v-if="editing" @submit.prevent="saveDisplayName"
               style="margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap">
           <input v-model="displayNameDraft" maxlength="100" required
                  :disabled="saving"
-                 style="padding:0.35rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9rem;flex:1;min-width:160px" />
+                 style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem;flex:1;min-width:160px" />
           <button type="submit" :disabled="saving"
-                  style="padding:0.35rem 0.8rem;background:#4f46e5;color:#fff;border:none;border-radius:4px;cursor:pointer">
+                  style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
             {{ saving ? 'Saving…' : 'Save' }}
           </button>
           <button type="button" :disabled="saving"
-                  style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer"
+                  style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
                   @click="editing=false">Cancel</button>
         </form>
-        <div v-if="saveError" role="alert" style="color:#dc2626;font-size:0.8rem;margin-top:0.25rem">{{ saveError }}</div>
-        <div v-if="saveSuccess" role="status" style="color:#16a34a;font-size:0.8rem;margin-top:0.25rem">Saved.</div> -->
+        <div v-if="saveError" role="alert" style="color:var(--danger);font-size:0.8rem;margin-top:0.25rem">{{ saveError }}</div>
+        <div v-if="saveSuccess" role="status" style="color:var(--ok);font-size:0.8rem;margin-top:0.25rem">Saved.</div> -->
       </div>
 
-      <div style="font-size:0.9rem;color:#475569">
+      <div style="font-size:0.9rem;color:var(--muted)">
         <span><strong>Batch:</strong> {{ session.me?.batchYear ?? '—' }}</span>
         <span style="margin-left:1rem"><strong>Branch:</strong> {{ session.me?.branch ?? '—' }}</span>
       </div>
     </section>
 
     <!-- Codeforces section -->
-    <section style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:1.5rem;margin-bottom:1.5rem">
+    <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1.5rem;margin-bottom:1.5rem">
       <h2 style="font-size:1rem;margin:0 0 1rem">Codeforces</h2>
 
-      <div v-if="session.loading" style="color:#94a3b8;font-size:0.9rem">Loading…</div>
+      <div v-if="session.loading" style="color:var(--muted);font-size:0.9rem">Loading…</div>
 
       <div v-else-if="session.hasCfLink" style="font-size:0.9rem">
         <div style="margin-bottom:0.75rem">
           <strong>Linked handle:</strong>
-          <span style="margin-left:0.5rem;font-weight:600;color:#4f46e5">{{ session.cfHandle }}</span>
+          <span style="margin-left:0.5rem;font-weight:600;color:var(--accent)">{{ session.cfHandle }}</span>
         </div>
 
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem">
           <!-- Re-link: real navigation to trigger server OAuth -->
           <a href="/api/v1/codeforces/link/start"
-             style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem;text-decoration:none;color:#1e293b;display:inline-block">
+             style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem;text-decoration:none;color:var(--text);display:inline-block">
             Re-link
           </a>
 
           <!-- Unlink -->
           <button :disabled="unlinking"
-                  style="padding:0.35rem 0.8rem;border:1px solid #dc2626;color:#dc2626;border-radius:4px;font-size:0.85rem;cursor:pointer;background:#fff"
+                  style="padding:0.35rem 0.8rem;border:1px solid var(--danger);color:var(--danger);border-radius:4px;font-size:0.85rem;cursor:pointer;background:var(--surface)"
                   @click="handleUnlink">
             {{ unlinking ? 'Unlinking…' : 'Unlink' }}
           </button>
 
           <!-- Clear local data -->
           <button :disabled="clearingData"
-                  style="padding:0.35rem 0.8rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.85rem;cursor:pointer;background:#fff"
+                  style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;font-size:0.85rem;cursor:pointer;background:var(--surface)"
                   @click="handleClearData">
             {{ clearingData ? 'Clearing…' : 'Clear local data' }}
           </button>
         </div>
 
         <div v-if="unlinkError" role="alert"
-             style="color:#dc2626;font-size:0.8rem;background:#fee2e2;border-radius:4px;padding:0.5rem 0.75rem;">
+             style="color:var(--danger);font-size:0.8rem;background:var(--danger-bg);border-radius:4px;padding:0.5rem 0.75rem;">
           {{ unlinkError }}
         </div>
-        <div v-if="clearDone" role="status" style="color:#16a34a;font-size:0.8rem;margin-top:0.25rem">
+        <div v-if="clearDone" role="status" style="color:var(--ok);font-size:0.8rem;margin-top:0.25rem">
           Local data cleared. It will re-fetch on next dashboard visit.
         </div>
       </div>
 
       <div v-else style="font-size:0.9rem">
-        <p style="margin:0 0 0.75rem;color:#64748b">No Codeforces handle linked.</p>
+        <p style="margin:0 0 0.75rem;color:var(--muted)">No Codeforces handle linked.</p>
         <a href="/api/v1/codeforces/link/start"
-           style="padding:0.35rem 0.9rem;background:#4f46e5;color:#fff;border-radius:4px;text-decoration:none;font-size:0.85rem;display:inline-block">
+           style="padding:0.35rem 0.9rem;background:var(--accent);color:var(--surface);border-radius:4px;text-decoration:none;font-size:0.85rem;display:inline-block">
           Link Codeforces
         </a>
       </div>
     </section>
 
     <!-- Sign out -->
-    <section style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:1.5rem">
+    <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1.5rem">
       <h2 style="font-size:1rem;margin:0 0 1rem">Session</h2>
-      <button style="padding:0.4rem 1rem;background:#fff;border:1px solid #dc2626;color:#dc2626;border-radius:4px;cursor:pointer;font-size:0.9rem"
+      <button style="padding:0.4rem 1rem;background:var(--surface);border:1px solid var(--danger);color:var(--danger);border-radius:4px;cursor:pointer;font-size:0.9rem"
               @click="handleLogout">
         Sign out
       </button>

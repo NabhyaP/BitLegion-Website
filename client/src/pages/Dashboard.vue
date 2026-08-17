@@ -79,8 +79,8 @@ const DONUT_CX = 90;
 const DONUT_CY = 90;
 
 const DONUT_COLORS = [
-  '#4f46e5','#0891b2','#059669','#d97706','#dc2626',
-  '#7c3aed','#0284c7','#16a34a','#b45309','#e11d48','#64748b',
+  'var(--accent)','var(--accent)','var(--ok)','var(--warn)','var(--danger)',
+  'var(--accent)','var(--accent)','var(--ok)','var(--warn)','var(--danger)','var(--muted)',
 ];
 
 const donutArcs = computed(() => {
@@ -114,7 +114,7 @@ const diffBars = computed(() => {
     label: d.rating === null ? 'Unrated' : String(d.rating),
     count: d.count,
     pct: maxCount > 0 ? (d.count / maxCount) * 100 : 0,
-    color: d.rating === null ? '#94a3b8' : rankInfo(d.rating ?? 0).color,
+    color: d.rating === null ? 'var(--muted)' : rankInfo(d.rating ?? 0).color,
   }));
 });
 
@@ -140,11 +140,11 @@ const calendarCells = computed(() => {
 });
 
 function calColor(count: number): string {
-  if (count <= 0) return '#e2e8f0';
-  if (count <= 2) return '#bbf7d0';
-  if (count <= 5) return '#4ade80';
-  if (count <= 10) return '#16a34a';
-  return '#15803d';
+  if (count <= 0) return 'var(--line)';
+  if (count <= 2) return 'var(--ok-bg)';
+  if (count <= 5) return 'var(--ok)';
+  if (count <= 10) return 'var(--ok)';
+  return 'var(--ok)';
 }
 
 // ── Freshness label ───────────────────────────────────────────────────────
@@ -171,11 +171,11 @@ function doRefresh() {
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:0.5rem">
       <h1 style="margin:0">Dashboard</h1>
       <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
-        <span v-if="session.me" style="font-size:0.9rem;color:#475569">{{ session.me.displayName }}</span>
+        <span v-if="session.me" style="font-size:0.9rem;color:var(--muted)">{{ session.me.displayName }}</span>
         <RouterLink to="/leaderboard">Leaderboard</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
         <RouterLink v-if="session.isAdmin" to="/admin"
-                    style="background:#1e293b;color:#fff;padding:0.25rem 0.75rem;border-radius:4px;text-decoration:none;font-size:0.85rem">
+                    style="background:var(--text);color:var(--surface);padding:0.25rem 0.75rem;border-radius:4px;text-decoration:none;font-size:0.85rem">
           Admin ⚙
         </RouterLink>
       </div>
@@ -183,55 +183,55 @@ function doRefresh() {
 
     <!-- Storage unavailable notice -->
     <div v-if="isStorageUnavailable()" role="alert" aria-live="polite"
-         style="background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+         style="background:var(--warn-bg);border:1px solid var(--warn);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
       <strong>Notice:</strong> IndexedDB is not available. Codeforces data will be lost on page reload.
     </div>
 
     <!-- No CF link -->
     <section v-if="!session.hasCfLink && !session.loading"
-             style="background:#f8fafc;padding:2rem;border-radius:6px;text-align:center">
+             style="background:var(--surface);padding:2rem;border-radius:6px;text-align:center">
       <p style="margin-bottom:1rem">Your Codeforces handle is not linked yet.</p>
       <a href="/api/v1/codeforces/link/start"
-         style="background:#4f46e5;color:#fff;padding:0.5rem 1.25rem;border-radius:4px;text-decoration:none">
+         style="background:var(--accent);color:var(--surface);padding:0.5rem 1.25rem;border-radius:4px;text-decoration:none">
         Link Codeforces →
       </a>
     </section>
 
     <!-- Loading session -->
     <div v-else-if="!session.hasCfLink && session.loading"
-         role="status" style="padding:2rem;text-align:center;color:#94a3b8">
+         role="status" style="padding:2rem;text-align:center;color:var(--muted)">
       Loading…
     </div>
 
     <template v-else-if="cfRefs">
       <!-- Rate-limited notice -->
       <div v-if="cfRefs.status.value === 'rate-limited'" role="alert" aria-live="assertive"
-           style="background:#fee2e2;border:1px solid #dc2626;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+           style="background:var(--danger-bg);border:1px solid var(--danger);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
         <strong>Rate limit reached.</strong> Your cached data is shown below.
         <button style="margin-left:1rem;cursor:pointer" @click="doRefresh">Retry</button>
-        <small style="display:block;margin-top:0.25rem;color:#7f1d1d">
+        <small style="display:block;margin-top:0.25rem;color:var(--danger)">
           Note: Many students on the same campus network share Codeforces' rate limit.
         </small>
       </div>
 
       <!-- CF unavailable notice -->
       <div v-if="cfRefs.status.value === 'cf-unavailable'" role="alert" aria-live="polite"
-           style="background:#fef3c7;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+           style="background:var(--warn-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
         <strong>Codeforces is currently unavailable.</strong> Showing cached data.
       </div>
 
       <!-- Error: first visit, no cache -->
       <div v-if="cfRefs.status.value === 'error' && !cfRefs.profile.value" role="alert"
-           style="background:#fee2e2;border-radius:4px;padding:1rem;margin-bottom:1rem">
+           style="background:var(--danger-bg);border-radius:4px;padding:1rem;margin-bottom:1rem">
         Could not load Codeforces data.
         <span v-if="cfRefs.errorMessage.value" style="margin-left:0.25rem">({{ cfRefs.errorMessage.value }})</span>
         <button style="margin-left:1rem;cursor:pointer" @click="doRefresh">Retry</button>
-        <p style="margin-top:0.5rem;font-size:0.85rem;color:#475569">The rest of BitLegion is fully usable.</p>
+        <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">The rest of BitLegion is fully usable.</p>
       </div>
 
       <!-- Loading spinner — first visit only -->
       <div v-if="cfRefs.status.value === 'loading' && !cfRefs.profile.value"
-           aria-live="polite" role="status" style="padding:2rem;text-align:center;color:#64748b">
+           aria-live="polite" role="status" style="padding:2rem;text-align:center;color:var(--muted)">
         Loading Codeforces data for <strong>{{ session.cfHandle }}</strong>…
       </div>
 
@@ -239,13 +239,13 @@ function doRefresh() {
       <template v-if="cfRefs.profile.value">
 
         <!-- Freshness + refresh button -->
-        <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.75rem;margin-bottom:1rem;font-size:0.8rem;color:#94a3b8">
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.75rem;margin-bottom:1rem;font-size:0.8rem;color:var(--muted)">
           <span v-if="cfRefs.stale.value">⚠ Data may be stale</span>
           <span v-else-if="freshnessLabel">{{ freshnessLabel }}</span>
           <span v-if="isRefreshing" aria-live="polite">Refreshing…</span>
           <button
             :disabled="isRefreshing"
-            style="font-size:0.8rem;cursor:pointer;padding:0.25rem 0.75rem;border:1px solid #cbd5e1;border-radius:4px;background:#fff"
+            style="font-size:0.8rem;cursor:pointer;padding:0.25rem 0.75rem;border:1px solid var(--line);border-radius:4px;background:var(--surface)"
             :aria-label="isRefreshing ? 'Refreshing data' : 'Refresh Codeforces data'"
             @click="doRefresh"
           >
@@ -256,45 +256,45 @@ function doRefresh() {
         <!-- Stat row -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:2rem"
              role="region" aria-label="Codeforces stats summary">
-          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+          <div style="background:var(--surface);padding:1rem;border-radius:6px;text-align:center;border:1px solid var(--line)">
             <div :style="{ fontSize:'1.75rem', fontWeight:700, color: ratingRank?.color }">
               {{ cfRefs.profile.value.rating }}
             </div>
-            <div style="font-size:0.75rem;color:#64748b">Current Rating</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Current Rating</div>
             <div style="font-size:0.75rem" :style="{ color: ratingRank?.color }">{{ ratingRank?.label }}</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
+          <div style="background:var(--surface);padding:1rem;border-radius:6px;text-align:center;border:1px solid var(--line)">
             <div :style="{ fontSize:'1.75rem', fontWeight:700, color: maxRatingRank?.color }">
               {{ cfRefs.profile.value.maxRating }}
             </div>
-            <div style="font-size:0.75rem;color:#64748b">Max Rating</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Max Rating</div>
             <div style="font-size:0.75rem" :style="{ color: maxRatingRank?.color }">{{ maxRatingRank?.label }}</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
-            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
+          <div style="background:var(--surface);padding:1rem;border-radius:6px;text-align:center;border:1px solid var(--line)">
+            <div style="font-size:1.75rem;font-weight:700;color:var(--text)">
               {{ cfRefs.analytics.value?.uniqueAccepted ?? '—' }}
             </div>
-            <div style="font-size:0.75rem;color:#64748b">Problems Solved</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Problems Solved</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
-            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
+          <div style="background:var(--surface);padding:1rem;border-radius:6px;text-align:center;border:1px solid var(--line)">
+            <div style="font-size:1.75rem;font-weight:700;color:var(--text)">
               {{ cfRefs.ratings.value.length }}
             </div>
-            <div style="font-size:0.75rem;color:#64748b">Contests</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Contests</div>
           </div>
-          <div style="background:#f8fafc;padding:1rem;border-radius:6px;text-align:center;border:1px solid #e2e8f0">
-            <div style="font-size:1.75rem;font-weight:700;color:#1e293b">
+          <div style="background:var(--surface);padding:1rem;border-radius:6px;text-align:center;border:1px solid var(--line)">
+            <div style="font-size:1.75rem;font-weight:700;color:var(--text)">
               {{ cfRefs.analytics.value?.attemptedUnsolved ?? '—' }}
             </div>
-            <div style="font-size:0.75rem;color:#64748b">Unsolved Attempts</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Unsolved Attempts</div>
           </div>
         </div>
 
         <!-- Rating history chart -->
-        <section style="margin-bottom:2rem;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+        <section style="margin-bottom:2rem;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem"
                  aria-label="Rating history chart">
           <h2 style="font-size:1rem;margin:0 0 0.75rem">Rating History</h2>
-          <div v-if="!chartPath" style="color:#94a3b8;font-size:0.9rem">
+          <div v-if="!chartPath" style="color:var(--muted);font-size:0.9rem">
             Not enough contest data to show a chart.
           </div>
           <template v-else>
@@ -310,7 +310,7 @@ function doRefresh() {
                 :key="tick.label"
                 :x1="CHART_PAD.left" :y1="tick.y"
                 :x2="CHART_W - CHART_PAD.right" :y2="tick.y"
-                stroke="#e2e8f0" stroke-width="1"
+                stroke="var(--line)" stroke-width="1"
               />
               <!-- Y axis labels -->
               <text
@@ -319,17 +319,17 @@ function doRefresh() {
                 :x="CHART_PAD.left - 4"
                 :y="tick.y"
                 font-size="11"
-                fill="#94a3b8"
+                fill="var(--muted)"
                 text-anchor="end"
                 dominant-baseline="middle"
               >{{ tick.label }}</text>
               <!-- Line -->
-              <path :d="chartPath.d" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round" />
+              <path :d="chartPath.d" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" />
               <!-- Current point -->
-              <circle :cx="chartPath.lastX" :cy="chartPath.lastY" r="4" fill="#4f46e5" />
+              <circle :cx="chartPath.lastX" :cy="chartPath.lastY" r="4" fill="var(--accent)" />
             </svg>
             <!-- Text summary for accessibility -->
-            <!-- <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+            <!-- <details style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">
               <summary>Rating history data</summary>
               <ul style="max-height:8rem;overflow-y:auto;margin:0.5rem 0 0;padding-left:1.5rem">
                 <li v-for="r in cfRefs.ratings.value" :key="r.contestId">
@@ -345,10 +345,10 @@ function doRefresh() {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.5rem;margin-bottom:2rem">
 
           <!-- Tag donut -->
-          <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+          <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem"
                    aria-label="Problems by topic">
             <h2 style="font-size:1rem;margin:0 0 0.75rem">Problems by Topic</h2>
-            <div v-if="!donutArcs" style="color:#94a3b8;font-size:0.9rem">No tag data yet.</div>
+            <div v-if="!donutArcs" style="color:var(--muted);font-size:0.9rem">No tag data yet.</div>
             <template v-else>
               <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
                 <svg :viewBox="`0 0 180 180`" style="width:180px;height:180px;flex-shrink:0"
@@ -360,17 +360,17 @@ function doRefresh() {
                     :fill="arc.color"
                     :aria-label="`${arc.tag}: ${arc.count}`"
                   />
-                  <text x="90" y="86" text-anchor="middle" font-size="13" fill="#1e293b" font-weight="600">
+                  <text x="90" y="86" text-anchor="middle" font-size="13" fill="var(--text)" font-weight="600">
                     {{ cfRefs.analytics.value?.uniqueAccepted }}
                   </text>
-                  <text x="90" y="101" text-anchor="middle" font-size="10" fill="#64748b">solved</text>
+                  <text x="90" y="101" text-anchor="middle" font-size="10" fill="var(--muted)">solved</text>
                 </svg>
                 <ul style="list-style:none;padding:0;margin:0;font-size:0.8rem;flex:1;min-width:0">
                   <li v-for="(arc, i) in donutArcs" :key="arc.tag"
                       style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.3rem;min-width:0">
                     <span :style="{ width:'10px', height:'10px', borderRadius:'2px', background: arc.color, flexShrink:0 }" aria-hidden="true"></span>
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ arc.tag }}</span>
-                    <span style="margin-left:auto;color:#64748b;flex-shrink:0">{{ arc.count }}</span>
+                    <span style="margin-left:auto;color:var(--muted);flex-shrink:0">{{ arc.count }}</span>
                   </li>
                 </ul>
               </div>
@@ -378,21 +378,21 @@ function doRefresh() {
           </section>
 
           <!-- Difficulty bars -->
-          <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem"
+          <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem"
                    aria-label="Problems by difficulty">
             <h2 style="font-size:1rem;margin:0 0 0.75rem">Problems by Difficulty</h2>
-            <div v-if="!diffBars" style="color:#94a3b8;font-size:0.9rem">No difficulty data yet.</div>
+            <div v-if="!diffBars" style="color:var(--muted);font-size:0.9rem">No difficulty data yet.</div>
             <template v-else>
               <div v-for="bar in diffBars" :key="bar.label"
                    style="display:grid;grid-template-columns:3.5rem 1fr 2rem;gap:0.5rem;align-items:center;margin-bottom:0.5rem;font-size:0.8rem">
-                <span style="text-align:right;color:#475569" :style="{ color: bar.color }">{{ bar.label }}</span>
-                <div style="background:#f1f5f9;border-radius:3px;height:14px;overflow:hidden" role="presentation">
+                <span style="text-align:right;color:var(--muted)" :style="{ color: bar.color }">{{ bar.label }}</span>
+                <div style="background:var(--surface);border-radius:3px;height:14px;overflow:hidden" role="presentation">
                   <div :style="{ width: bar.pct + '%', height:'100%', background: bar.color, borderRadius:'3px' }"></div>
                 </div>
-                <span style="color:#64748b">{{ bar.count }}</span>
+                <span style="color:var(--muted)">{{ bar.count }}</span>
               </div>
               <!-- Text summary for accessibility -->
-              <!-- <details style="font-size:0.8rem;color:#64748b;margin-top:0.5rem">
+              <!-- <details style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">
                 <summary>Difficulty data table</summary>
                 <table style="width:100%;border-collapse:collapse;margin-top:0.4rem">
                   <thead><tr><th style="text-align:left;font-weight:600">Rating</th><th style="text-align:right;font-weight:600">Count</th></tr></thead>
@@ -408,10 +408,10 @@ function doRefresh() {
         </div>
 
         <!-- Practice calendar -->
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem;margin-bottom:2rem"
+        <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem;margin-bottom:2rem"
                  aria-label="Practice calendar — last 52 weeks">
           <h2 style="font-size:1rem;margin:0 0 0.75rem">Practice Calendar (last 52 weeks)</h2>
-          <div v-if="!calendarCells" style="color:#94a3b8;font-size:0.9rem">No submission data yet.</div>
+          <div v-if="!calendarCells" style="color:var(--muted);font-size:0.9rem">No submission data yet.</div>
           <template v-else>
             <div style="overflow-x:auto">
               <svg
@@ -435,9 +435,9 @@ function doRefresh() {
               </svg>
             </div>
             <!-- Calendar legend -->
-            <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;font-size:0.75rem;color:#64748b">
+            <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;font-size:0.75rem;color:var(--muted)">
               <span>Less</span>
-              <span v-for="c in ['#e2e8f0','#bbf7d0','#4ade80','#16a34a','#15803d']" :key="c"
+              <span v-for="c in ['var(--line)','var(--ok-bg)','var(--ok)','var(--ok)','var(--ok)']" :key="c"
                     :style="{ width:'12px', height:'12px', background:c, borderRadius:'2px', display:'inline-block' }" aria-hidden="true"></span>
               <span>More</span>
             </div>
@@ -445,15 +445,15 @@ function doRefresh() {
         </section>
 
         <!-- Language usage -->
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1rem;margin-bottom:2rem"
+        <section style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1rem;margin-bottom:2rem"
                  aria-label="Language usage">
           <h2 style="font-size:1rem;margin:0 0 0.75rem">Language Usage</h2>
-          <div v-if="!cfRefs.analytics.value?.languageUsage?.length" style="color:#94a3b8;font-size:0.9rem">No data yet.</div>
+          <div v-if="!cfRefs.analytics.value?.languageUsage?.length" style="color:var(--muted);font-size:0.9rem">No data yet.</div>
           <ul v-else style="list-style:none;padding:0;margin:0;font-size:0.85rem;display:flex;flex-wrap:wrap;gap:0.5rem">
             <li
               v-for="l in cfRefs.analytics.value.languageUsage.slice(0, 10)"
               :key="l.language"
-              style="background:#f1f5f9;padding:0.25rem 0.6rem;border-radius:12px;color:#1e293b"
+              style="background:var(--surface);padding:0.25rem 0.6rem;border-radius:12px;color:var(--text)"
             >
               {{ l.language }}: <strong>{{ l.count }}</strong>
             </li>

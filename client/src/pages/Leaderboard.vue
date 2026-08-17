@@ -10,10 +10,15 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { fetchLeaderboard } from '@/api/index.ts';
 import { rankInfo } from '@/utils/rankColor.ts';
+import { useSessionStore } from '@/stores/session.ts';
 import type { LeaderboardEntry, LeaderboardMeta } from '@contracts';
 
 const route = useRoute();
 const router = useRouter();
+const session = useSessionStore();
+
+/** Highlight the signed-in user's own name so they can find themselves in the list. */
+const myUserId = computed(() => session.me?.id ?? null);
 
 // ── State ──────────────────────────────────────────────────────────────────
 const entries = ref<LeaderboardEntry[]>([]);
@@ -143,8 +148,8 @@ function fmtChange(v: number | null): string {
 }
 
 function changeStyle(v: number | null): string {
-  if (v === null) return 'color:#94a3b8';
-  return v > 0 ? 'color:#16a34a' : v < 0 ? 'color:#dc2626' : 'color:#64748b';
+  if (v === null) return 'color:var(--muted)';
+  return v > 0 ? 'color:var(--ok)' : v < 0 ? 'color:var(--danger)' : 'color:var(--muted)';
 }
 
 function snapshotAge(iso: string): string {
@@ -169,13 +174,13 @@ const onCursorPage = computed(() => cursor.value !== null);
 
     <!-- Preview banner (admin viewing disabled leaderboard) -->
     <div v-if="previewOnly" role="alert"
-         style="background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+         style="background:var(--warn-bg);border:1px solid var(--warn);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
       <strong>Preview mode:</strong> The leaderboard is currently hidden from the public.
     </div>
 
     <!-- Disabled state -->
     <div v-if="disabled && !previewOnly"
-         style="background:#f8fafc;padding:2rem;border-radius:6px;text-align:center;color:#64748b">
+         style="background:var(--surface);padding:2rem;border-radius:6px;text-align:center;color:var(--muted)">
       The leaderboard is currently unavailable.
     </div>
 
@@ -184,21 +189,21 @@ const onCursorPage = computed(() => cursor.value !== null);
       <div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem;align-items:flex-end">
         <!-- Search -->
         <div style="flex:1;min-width:180px">
-          <label for="lb-search" style="display:block;font-size:0.8rem;color:#475569;margin-bottom:0.25rem">Search</label>
+          <label for="lb-search" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Search</label>
           <input
             id="lb-search"
             v-model="q"
             type="search"
             placeholder="Name or handle…"
-            style="width:100%;padding:0.4rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9rem;box-sizing:border-box"
+            style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem;box-sizing:border-box"
             aria-label="Search by name or handle"
           />
         </div>
         <!-- Batch -->
         <div>
-          <label for="lb-batch" style="display:block;font-size:0.8rem;color:#475569;margin-bottom:0.25rem">Batch</label>
+          <label for="lb-batch" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Batch</label>
           <select id="lb-batch" v-model="batch"
-                  style="padding:0.4rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9rem"
+                  style="padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem"
                   aria-label="Filter by batch year">
             <option value="">All batches</option>
             <option v-for="y in batchYears" :key="y" :value="String(y)">{{ y }}</option>
@@ -206,9 +211,9 @@ const onCursorPage = computed(() => cursor.value !== null);
         </div>
         <!-- Branch -->
         <div>
-          <label for="lb-branch" style="display:block;font-size:0.8rem;color:#475569;margin-bottom:0.25rem">Branch</label>
+          <label for="lb-branch" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Branch</label>
           <select id="lb-branch" v-model="branch"
-                  style="padding:0.4rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9rem"
+                  style="padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem"
                   aria-label="Filter by branch">
             <option value="">All branches</option>
             <option v-for="b in BRANCHES" :key="b" :value="b">{{ b }}</option>
@@ -216,9 +221,9 @@ const onCursorPage = computed(() => cursor.value !== null);
         </div>
         <!-- Sort -->
         <div>
-          <label for="lb-sort" style="display:block;font-size:0.8rem;color:#475569;margin-bottom:0.25rem">Sort by</label>
+          <label for="lb-sort" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem">Sort by</label>
           <select id="lb-sort" v-model="sort"
-                  style="padding:0.4rem 0.6rem;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9rem"
+                  style="padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem"
                   aria-label="Sort leaderboard">
             <option value="rating">Current Rating</option>
             <option value="maxRating">Max Rating</option>
@@ -228,27 +233,27 @@ const onCursorPage = computed(() => cursor.value !== null);
       </div>
 
       <!-- Snapshot meta -->
-      <div v-if="meta" style="font-size:0.8rem;color:#94a3b8;margin-bottom:0.75rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.4rem">
+      <div v-if="meta" style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.4rem">
         <span>Snapshot generated {{ snapshotAge(meta.generatedAt) }}</span>
         <span>Next refresh at {{ new Date(meta.nextRefreshAfter).toLocaleTimeString() }}</span>
       </div>
 
       <!-- Error -->
       <div v-if="error" role="alert"
-           style="background:#fee2e2;border-radius:4px;padding:0.75rem;margin-bottom:1rem;font-size:0.9rem">
+           style="background:var(--danger-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem;font-size:0.9rem">
         {{ error }}
         <button style="margin-left:0.75rem;cursor:pointer" @click="fetchPage">Retry</button>
       </div>
 
       <!-- Loading -->
       <div v-if="loading && entries.length === 0" aria-live="polite" role="status"
-           style="text-align:center;padding:3rem;color:#94a3b8">
+           style="text-align:center;padding:3rem;color:var(--muted)">
         Loading…
       </div>
 
       <!-- Empty -->
       <div v-else-if="!loading && entries.length === 0 && !error"
-           style="text-align:center;padding:3rem;color:#94a3b8">
+           style="text-align:center;padding:3rem;color:var(--muted)">
         No results found.
       </div>
 
@@ -256,7 +261,7 @@ const onCursorPage = computed(() => cursor.value !== null);
       <div v-else style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:0.875rem" aria-label="Leaderboard">
           <thead>
-            <tr style="border-bottom:2px solid #e2e8f0;text-align:left">
+            <tr style="border-bottom:2px solid var(--line);text-align:left">
               <th style="padding:0.6rem 0.5rem;white-space:nowrap" scope="col">Rank</th>
               <th style="padding:0.6rem 0.5rem" scope="col">Name</th>
               <th style="padding:0.6rem 0.5rem" scope="col">Handle</th>
@@ -273,9 +278,9 @@ const onCursorPage = computed(() => cursor.value !== null);
               v-for="e in entries"
               :key="e.userId"
               :style="{ opacity: e.stale ? 0.65 : 1 }"
-              style="border-bottom:1px solid #f1f5f9"
+              style="border-bottom:1px solid var(--surface)"
             >
-              <td style="padding:0.6rem 0.5rem;font-weight:600;color:#475569">{{ e.rank }}</td>
+              <td style="padding:0.6rem 0.5rem;font-weight:600;color:var(--muted)">{{ e.rank }}</td>
               <td style="padding:0.6rem 0.5rem">
                 <RouterLink :to="`/profile/${e.handle}`" style="text-decoration:none;color:inherit">
                   <span style="display:flex;align-items:center;gap:0.5rem">
@@ -287,7 +292,9 @@ const onCursorPage = computed(() => cursor.value !== null);
                       style="border-radius:50%;object-fit:cover;flex-shrink:0"
                       loading="lazy"
                     />
-                    {{ e.displayName }}
+                    <span :style="e.userId === myUserId ? 'font-weight:700' : ''">
+                      {{ e.displayName }}<template v-if="e.userId === myUserId"> (you)</template>
+                    </span>
                   </span>
                 </RouterLink>
               </td>
@@ -296,13 +303,13 @@ const onCursorPage = computed(() => cursor.value !== null);
                             :style="{ color: rankInfo(e.rating).color, fontWeight: 600, textDecoration:'none' }">
                   {{ e.handle }}
                 </RouterLink>
-                <span v-if="e.stale" style="font-size:0.7rem;color:#d97706;margin-left:0.25rem" title="Stale data">⚠</span>
+                <span v-if="e.stale" style="font-size:0.7rem;color:var(--warn);margin-left:0.25rem" title="Stale data">⚠</span>
               </td>
-              <td style="padding:0.6rem 0.5rem;color:#64748b">{{ e.batch ?? '—' }}</td>
-              <td style="padding:0.6rem 0.5rem;color:#64748b">{{ e.branch ?? '—' }}</td>
+              <td style="padding:0.6rem 0.5rem;color:var(--muted)">{{ e.batch ?? '—' }}</td>
+              <td style="padding:0.6rem 0.5rem;color:var(--muted)">{{ e.branch ?? '—' }}</td>
               <td style="padding:0.6rem 0.5rem;text-align:right">
                 <span :style="{ color: rankInfo(e.rating).color, fontWeight:600 }">{{ e.rating }}</span>
-                <span style="display:block;font-size:0.7rem;color:#94a3b8">{{ rankInfo(e.rating).label }}</span>
+                <span style="display:block;font-size:0.7rem;color:var(--muted)">{{ rankInfo(e.rating).label }}</span>
               </td>
               <td style="padding:0.6rem 0.5rem;text-align:right">
                 <span :style="{ color: rankInfo(e.maxRating).color }">{{ e.maxRating }}</span>
@@ -310,9 +317,9 @@ const onCursorPage = computed(() => cursor.value !== null);
               <td style="padding:0.6rem 0.5rem;text-align:right" :style="changeStyle(e.ratingChange30d)">
                 {{ fmtChange(e.ratingChange30d) }}
               </td>
-              <td style="padding:0.6rem 0.5rem;text-align:right;color:#1e293b">
+              <td style="padding:0.6rem 0.5rem;text-align:right;color:var(--text)">
                 <template v-if="e.solvedCount === null">
-                  <span title="Solved count syncing — updates daily" style="color:#94a3b8">—</span>
+                  <span title="Solved count syncing — updates daily" style="color:var(--muted)">—</span>
                 </template>
                 <template v-else>{{ e.solvedCount }}</template>
               </td>
@@ -324,20 +331,20 @@ const onCursorPage = computed(() => cursor.value !== null);
       <!-- Pagination -->
       <div v-if="!loading && (meta?.nextCursor || onCursorPage)"
            style="display:flex;justify-content:space-between;margin-top:1rem">
-        <button v-if="onCursorPage" style="cursor:pointer;padding:0.4rem 0.9rem;border:1px solid #cbd5e1;border-radius:4px"
+        <button v-if="onCursorPage" style="cursor:pointer;padding:0.4rem 0.9rem;border:1px solid var(--line);border-radius:4px"
                 @click="prevPage">
           ← First page
         </button>
         <div v-else></div>
         <button v-if="meta?.nextCursor"
-                style="cursor:pointer;padding:0.4rem 0.9rem;border:1px solid #cbd5e1;border-radius:4px"
+                style="cursor:pointer;padding:0.4rem 0.9rem;border:1px solid var(--line);border-radius:4px"
                 @click="nextPage">
           Next →
         </button>
       </div>
 
       <!-- Ranking rules footnote -->
-      <p style="font-size:0.75rem;color:#94a3b8;margin-top:1.5rem">
+      <p style="font-size:0.75rem;color:var(--muted);margin-top:1.5rem">
         Rankings are based on Codeforces profiles fetched hourly. Solved counts update daily and
         may take a few days for new members. Null solved counts render as "—" while syncing.
         Stale entries (⚠) carry forward data from the previous snapshot.

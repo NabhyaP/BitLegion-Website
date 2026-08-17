@@ -1,0 +1,158 @@
+/**
+ * Global theme. The pages are plain semantic HTML, so styling the elements
+ * here restyles every page without touching them.
+ *
+ * ponytail: one stylesheet, no framework, no build step. The tokens exist so the
+ * inline styles scattered through the pages have something to point at.
+ */
+
+:root {
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1a1a1a;
+  --line: #262626;
+  --text: #e8e8e8;
+  --muted: #8a8a8a;
+  --accent: #e8e8e8;
+  --danger: #ff6b6b;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  /* Status fills: translucent so they tint the surface instead of washing it out. */
+  --danger-bg: rgba(255, 107, 107, 0.12);
+  --ok-bg: rgba(74, 222, 128, 0.12);
+  --warn-bg: rgba(251, 191, 36, 0.12);
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Pages render straight into #app; give them breathing room and a max width. */
+#app {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+h1 {
+  font-size: 1.9rem;
+}
+h2 {
+  font-size: 1.4rem;
+}
+h3 {
+  font-size: 1.1rem;
+}
+
+a {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+a:hover,
+a:focus-visible {
+  border-color: currentColor;
+}
+
+/* Tables — used heavily by Leaderboard, Teams and the admin pages. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0.5rem;
+}
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0.5rem;
+}
+tbody tr:hover {
+  background: var(--surface);
+}
+
+button {
+  font-family: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+button:hover:not(:disabled) {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.45rem 0.6rem;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+
+/* Keyboard focus stays visible everywhere. */
+:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 2px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  background: var(--surface);
+}
+hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
