@@ -30,6 +30,21 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   }
 };
 
+/** Populate identity when a valid session exists without requiring callers to sign in. */
+export const optionalAuth: RequestHandler = async (req, _res, next) => {
+  try {
+    const id = req.session?.userId;
+    if (!id) return next();
+    const user = await users.findById(id);
+    if (!user || user.status === 'SUSPENDED') return next();
+    req.user = user;
+    req.roles = await users.getRoles(user.id);
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
 /** Authorization is re-checked here AND in services — hiding a button is not authorization (§G). */
 export function requireRole(...allowed: RoleCode[]): RequestHandler {
   return (req, _res, next) => {

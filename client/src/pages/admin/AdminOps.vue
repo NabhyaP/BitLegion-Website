@@ -26,20 +26,21 @@ const loadError = ref<string | null>(null);
 
 async function loadAll() {
   loadError.value = null;
-  try {
-    const [lb, solved, issues, st] = await Promise.allSettled([
-      fetchLeaderboardJobStatus(),
-      fetchSolvedSyncJobStatus(),
-      fetchHandleIssues(),
-      fetchAdminStats(),
-    ]);
-    if (lb.status === 'fulfilled') lbRuns.value = lb.value.data.runs as JobRunSummary[];
-    if (solved.status === 'fulfilled') solvedRuns.value = solved.value.data.runs as JobRunSummary[];
-    if (issues.status === 'fulfilled') handleIssues.value = issues.value.data;
-    if (st.status === 'fulfilled') stats.value = st.value.data;
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : 'Load failed.';
-  }
+  const [lb, solved, issues, st] = await Promise.allSettled([
+    fetchLeaderboardJobStatus(),
+    fetchSolvedSyncJobStatus(),
+    fetchHandleIssues(),
+    fetchAdminStats(),
+  ]);
+  if (lb.status === 'fulfilled') lbRuns.value = lb.value.data.runs;
+  if (solved.status === 'fulfilled') solvedRuns.value = solved.value.data.runs;
+  if (issues.status === 'fulfilled') handleIssues.value = issues.value.data;
+  if (st.status === 'fulfilled') stats.value = st.value.data;
+
+  const failures = [lb, solved, issues, st]
+    .filter((result) => result.status === 'rejected')
+    .map((result) => result.reason instanceof Error ? result.reason.message : 'Request failed.');
+  if (failures.length) loadError.value = `Some operations data could not be loaded: ${failures.join(' ')}`;
 }
 
 onMounted(loadAll);
@@ -47,28 +48,30 @@ onMounted(loadAll);
 // ── LB retry ──────────────────────────────────────────────────────────────
 const retrying = ref(false);
 const retryMsg = ref<string | null>(null);
+const retryFailed = ref(false);
 
 async function doRetry() {
-  retrying.value = true; retryMsg.value = null;
+  retrying.value = true; retryMsg.value = null; retryFailed.value = false;
   try {
     const res = await retryLeaderboardJob();
     retryMsg.value = res.data.message;
     setTimeout(() => { retryMsg.value = null; loadAll(); }, 3000);
-  } catch (e) { retryMsg.value = e instanceof Error ? e.message : 'Failed.'; }
+  } catch (e) { retryFailed.value = true; retryMsg.value = e instanceof Error ? e.message : 'Failed.'; }
   finally { retrying.value = false; }
 }
 
 // ── Force resync ──────────────────────────────────────────────────────────
 const resyncingUser = ref<number | null>(null);
 const resyncMsg = ref<string | null>(null);
+const resyncFailed = ref(false);
 
 async function doResync(userId: number) {
-  resyncingUser.value = userId; resyncMsg.value = null;
+  resyncingUser.value = userId; resyncMsg.value = null; resyncFailed.value = false;
   try {
     const res = await forceResyncUser(userId);
     resyncMsg.value = res.data.message;
     setTimeout(() => { resyncMsg.value = null; }, 4000);
-  } catch (e) { resyncMsg.value = e instanceof Error ? e.message : 'Failed.'; }
+  } catch (e) { resyncFailed.value = true; resyncMsg.value = e instanceof Error ? e.message : 'Failed.'; }
   finally { resyncingUser.value = null; }
 }
 
@@ -170,7 +173,7 @@ function jobStatusStyle(s: string): string {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
         <h2 style="font-size:1rem;margin:0">Job 1: Leaderboard Refresh</h2>
         <div style="display:flex;align-items:center;gap:0.75rem">
-          <span v-if="retryMsg" :style="retryMsg.includes('rigger') ? 'color:var(--ok)' : 'color:var(--danger)'"
+          <span v-if="retryMsg" :style="retryFailed ? 'color:var(--danger)' : 'color:var(--ok)'"
                 style="font-size:0.8rem">{{ retryMsg }}</span>
           <button :disabled="retrying"
                   style="padding:0.3rem 0.7rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer;font-size:0.85rem"
@@ -196,9 +199,9 @@ function jobStatusStyle(s: string): string {
             <td style="padding:0.4rem;color:var(--muted)">{{ fmtDur(r.durationMs) }}</td>
             <td style="padding:0.4rem;color:var(--muted);font-size:0.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
               <span v-if="r.detail">
-                req={{ (r.detail as Record<string,unknown>).requested }},
-                upd={{ (r.detail as Record<string,unknown>).updated }},
-                stale={{ (r.detail as Record<string,unknown>).stale }}
+                req={{ (r.detail as Record<string,unknown>).handlesRequested }},
+                upd={{ (r.detail as Record<string,unknown>).handlesUpdated }},
+                stale={{ (r.detail as Record<string,unknown>).handlesStale }}
               </span>
             </td>
           </tr>
@@ -237,7 +240,8 @@ function jobStatusStyle(s: string): string {
           </tr>
         </tbody>
       </table>
-      <div v-if="resyncMsg" style="margin-top:0.5rem;font-size:0.8rem;color:var(--ok)">{{ resyncMsg }}</div>
+      <div v-if="resyncMsg" :style="{ color: resyncFailed ? 'var(--danger)' : 'var(--ok)' }"
+           style="margin-top:0.5rem;font-size:0.8rem">{{ resyncMsg }}</div>
     </section>
 
     <!-- Handle reconciliation queue -->

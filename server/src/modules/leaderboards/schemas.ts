@@ -20,3 +20,12 @@ export const leaderboardQuerySchema = z
     cursor: z.string().max(500).optional(),
   })
   .strict();
+
+export const ratingTrendsQuerySchema = z.object({
+  days: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .refine((days) => [30, 90, 180, 365, 730].includes(days), 'Unsupported trend range')
+    .default('365'),
+}).strict();

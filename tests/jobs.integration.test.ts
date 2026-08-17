@@ -11,13 +11,13 @@
  * - leaderboard_active only points to READY versions.
  */
 
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { pool } from '../server/src/db/pool.ts';
-import { resetDb, closeDb, seedCfLink, seedPreProvisioned, countRows } from './helpers/db.ts';
+import { resetDb, closeDb, seedCfLink, countRows } from './helpers/db.ts';
 import * as lbRepo from '../server/src/modules/leaderboards/repository.ts';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,7 +28,7 @@ async function createUser(
   displayName = 'Test User',
   status = 'ACTIVE',
 ): Promise<number> {
-  const [res] = await pool.query<any>(
+  const [res] = await pool.query<ResultSetHeader>(
     `INSERT INTO users (college_email, display_name, status, profile_confirmed)
      VALUES (?, ?, ?, 1)`,
     [email, displayName, status],
@@ -38,7 +38,7 @@ async function createUser(
 
 /** Seed a leaderboard_versions row in RUNNING status, optionally old. */
 async function seedRunningVersion(minutesAgo = 0): Promise<number> {
-  const [res] = await pool.query<any>(
+  const [res] = await pool.query<ResultSetHeader>(
     `INSERT INTO leaderboard_versions (status, started_at)
      VALUES ('RUNNING', DATE_SUB(NOW(), INTERVAL ? MINUTE))`,
     [minutesAgo],
@@ -380,11 +380,11 @@ describe('Job 2 — solved_count idempotency', () => {
     async function simulateSync(problemKeys: string[]) {
       const ph = problemKeys.map(() => '(?,?)').join(',');
       if (ph.length === 0) return;
-      const [res] = await pool.query<any>(
+      const [res] = await pool.query<ResultSetHeader>(
         `INSERT IGNORE INTO codeforces_solved_problems (user_id, problem_key) VALUES ${ph}`,
         problemKeys.flatMap((k) => [userId, k]),
       );
-      const delta = res.affectedRows as number;
+      const delta = res.affectedRows;
       await pool.query(
         `UPDATE codeforces_solved_state SET solved_count = solved_count + ? WHERE user_id = ?`,
         [delta, userId],

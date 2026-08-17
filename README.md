@@ -16,9 +16,18 @@ npm install
 cp .env.example .env          # fill in DB_* and SESSION_SECRET at minimum
 npm run migrate               # apply all migrations
 npm run seed                  # seed roles, settings defaults, demo team
-npm run dev --workspace=server   # API server on :3000
-npm run dev --workspace=client   # Vite dev server on :5173 (proxies /api → :3000)
+npm run dev                   # API on :3000 + Vite on :5173
 ```
+
+To test the leaderboard with several live Codeforces profiles while using only
+one Google login, seed local fixture members and publish a normal snapshot:
+
+```bash
+npm run leaderboard:demo       # add fixtures and refresh the leaderboard
+npm run leaderboard:demo:clear # remove fixtures and refresh again
+```
+
+Both commands refuse to run outside development or against a non-local database.
 
 ### Run tests
 ```bash
@@ -38,7 +47,7 @@ In production, set them in the Hostinger Node app environment panel.
 |---|---|---|
 | `NODE_ENV` | yes | `development` / `production` |
 | `PORT` | yes | Default `3000` |
-| `APP_URL` | yes | Full URL, e.g. `https://bitlegion.iiitp.ac.in` |
+| `APP_URL` | yes | Origin only, e.g. `https://bitlegion.iiitp.ac.in` (HTTPS required in production) |
 | `DB_HOST` | yes | Hostinger managed MySQL host |
 | `DB_PORT` | yes | Default `3306` |
 | `DB_USER` | yes | Least-privilege MySQL user |
@@ -55,7 +64,7 @@ In production, set them in the Hostinger Node app environment panel.
 | `LEADERBOARD_BATCH_SIZE` | no | Default `75` |
 | `SOLVED_SYNC_USERS_PER_RUN` | no | Default `350` |
 | `SOLVED_SYNC_MAX_PAGES_PER_USER` | no | Default `20` |
-| `JOB_TRIGGER_SECRET` | no | For HTTP cron trigger fallback |
+| `JOB_TRIGGER_SECRET` | no | At least 32 characters; required only for the HTTP cron fallback |
 | `GIT_SHA` | no | Injected at deploy time for the health endpoint `version` field |
 
 ---
@@ -71,13 +80,13 @@ npm run build           # client/dist + server/dist
 # 2. Set all env vars in Hostinger panel
 
 # 3. Apply migrations
-node dist/db/migrate.js   # via Hostinger SSH or Node script runner
+node server/dist/server/src/db/migrate.js   # via Hostinger SSH or Node script runner
 
 # 4. Seed defaults (run once)
-node dist/scripts/seed.js
+node server/dist/server/src/scripts/seed.js
 
 # 5. Start
-node dist/server.js
+npm start
 ```
 
 ### Routine redeploy
@@ -85,14 +94,14 @@ node dist/server.js
 ```bash
 npm run build
 # Any new migrations:
-node dist/db/migrate.js
+node server/dist/server/src/db/migrate.js
 # Restart Node app in Hostinger panel
 ```
 
 ### Rollback
 
 ```bash
-node dist/db/migrate.js down   # rolls back ONE migration
+node server/dist/server/src/db/migrate.js down   # rolls back ONE migration
 # Redeploy previous build
 ```
 
@@ -104,20 +113,23 @@ Configure in Hostinger → Hosting → Cron Jobs. All times are UTC.
 
 | Schedule | Command | Description |
 |---|---|---|
-| `0 * * * *` | `node dist/jobs/refresh-codeforces-leaderboard.js` | Leaderboard snapshot (hourly) |
-| `0 21 * * *` | `node dist/jobs/sync-solved-counts.js` | Solved counts (02:30 IST) |
-| `30 22 * * *` | `node dist/jobs/retain-leaderboard-history.js` | Prune old snapshots |
-| `45 22 * * *` | `node dist/jobs/cleanup-sessions-and-links.js` | Expire sessions + link attempts |
+| `0 * * * *` | `node server/dist/server/src/jobs/refresh-codeforces-leaderboard.js` | Leaderboard snapshot (hourly) |
+| `0 21 * * *` | `node server/dist/server/src/jobs/sync-solved-counts.js` | Solved counts (02:30 IST) |
+| `30 22 * * *` | `node server/dist/server/src/jobs/retain-leaderboard-history.js` | Prune old snapshots |
+| `45 22 * * *` | `node server/dist/server/src/jobs/cleanup-sessions-and-links.js` | Expire sessions + link attempts |
 
 **If Hostinger Cron cannot run Node commands:** use the HTTP trigger fallback.
 Set `JOB_TRIGGER_SECRET` in env, then POST to `/api/v1/admin/jobs/leaderboard/retry` with
 header `x-job-secret: <value>` (or use the Admin → Operations → Trigger refresh button).
+The endpoint returns `202` only after the background job process has started.
 
 ### Registration-week note
 
 New members' solved counts are synced nightly. The leaderboard copy reads:
 _"Solved counts update daily and may take a few days for new members."_
 Ratings refresh hourly from Job 1. No manual intervention is needed.
+Linking or unlinking a Codeforces account also triggers Job 1 immediately; its MySQL named lock
+prevents overlap with the fixed cron run.
 
 ---
 
@@ -157,7 +169,11 @@ Hostinger provides daily automatic MySQL backups. Before any migration or major 
 
 1. Download a backup from Hostinger → Databases → Backups.
 2. To restore: import the `.sql` dump via Hostinger phpMyAdmin or SSH + `mysql` CLI.
-3. Re-run `node dist/db/migrate.js` to ensure migrations table is consistent.
+3. Re-run `node server/dist/server/src/db/migrate.js` to ensure migrations are current.
+
+If a migration stops in `APPLYING` or `REVERTING`, the runner intentionally refuses further
+changes. Inspect and restore that migration's schema manually, then clear only its marker with
+`node server/dist/server/src/db/migrate.js repair <migration-file>` and run migrations again.
 
 ---
 
@@ -172,11 +188,16 @@ Hostinger provides daily automatic MySQL backups. Before any migration or major 
 - Emails are never exposed in public API responses.
 - Audit events are written in the same DB transaction as every mutation.
 - `helmet` sets CSP, HSTS (production), and other security headers.
+- Cross-origin state-changing requests are rejected against the configured `APP_URL` origin.
 - Rate limits: auth 10/min, link 5/min, writes 30/min, admin 60/min, public reads 120/min.
 
 ---
 
 ## Repository structure
+
+Personal dashboard analytics and upcoming contests are fetched directly from Codeforces by the
+browser. The shared leaderboard, cohort trends, and personal college comparison read only from
+published database snapshots maintained by the scheduled jobs.
 
 ```
 bitlegion/

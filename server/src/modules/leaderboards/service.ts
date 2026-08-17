@@ -12,22 +12,21 @@ import crypto from 'node:crypto';
 import * as repo from './repository.ts';
 import type { SortField, QueryLeaderboardOptions } from './repository.ts';
 import * as settingsRepo from '../settings/repository.ts';
-import type { LeaderboardEntry, LeaderboardMeta, LeaderboardResponse } from '../../../../shared/contracts/index.ts';
+import { badRequest } from '../../shared/errors.ts';
+import { buildRatingTrendSeries, summarizeComparison } from './statistics.ts';
+import type {
+  LeaderboardEntry,
+  LeaderboardMeta,
+  LeaderboardResponse,
+  PersonalComparisonResponse,
+  RatingTrendsResponse,
+} from '../../../../shared/contracts/index.ts';
 
 // ---------------------------------------------------------------------------
 // In-process cache for the active snapshot meta (60 s, §F)
 // ---------------------------------------------------------------------------
-let cachedMeta: { versionId: number; completedAt: Date; fetchedAt: number } | null = null;
-const META_TTL_MS = 60_000;
-
 async function getVersionMeta(): Promise<{ versionId: number; completedAt: Date } | null> {
-  const now = Date.now();
-  if (cachedMeta && now - cachedMeta.fetchedAt < META_TTL_MS) {
-    return { versionId: cachedMeta.versionId, completedAt: cachedMeta.completedAt };
-  }
-  const meta = await repo.getActiveVersionMeta();
-  if (meta) cachedMeta = { ...meta, fetchedAt: now };
-  return meta;
+  return repo.getActiveVersionMeta();
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +74,7 @@ export async function getLeaderboard(
 
   // 4. Decode cursor
   const cursor = query.cursor ? repo.decodeCursor(query.cursor) : null;
+  if (query.cursor && !cursor) throw badRequest('Invalid leaderboard cursor.');
 
   // 5. Query — scope gates which filters are active
   const opts: QueryLeaderboardOptions = {
@@ -103,6 +103,7 @@ export async function getLeaderboard(
       maxRating: last.maxRating,
       solvedCount: last.solvedCount,
       handle: last.handle,
+      offset: (cursor?.offset ?? 0) + pageRows.length,
     });
   }
 
@@ -110,7 +111,7 @@ export async function getLeaderboard(
   //    or continuing from decoded cursor position for subsequent pages).
   //    Per spec: rank is recomputed for the requested sort/filter — use sequential page rank.
   const data: LeaderboardEntry[] = pageRows.map((r, i) => ({
-    rank: i + 1, // page-relative; full rank requires total count which is expensive
+    rank: (cursor?.offset ?? 0) + i + 1,
     userId: r.userId,
     displayName: r.displayName,
     handle: r.handle,
@@ -138,6 +139,57 @@ export async function getLeaderboard(
   };
 
   return { data, meta: responseMeta };
+}
+
+export async function getRatingTrends(days: number): Promise<RatingTrendsResponse> {
+  const enabledRaw = await settingsRepo.getSetting('leaderboard_enabled');
+  if ((enabledRaw ?? 'true') !== 'true') return { disabled: true };
+
+  const meta = await getVersionMeta();
+  if (!meta) return { disabled: true };
+
+  const history = await repo.getRatingHistory(days);
+  return {
+    data: buildRatingTrendSeries(history),
+    meta: { generatedAt: meta.completedAt.toISOString(), days },
+  };
+}
+
+export async function getPersonalComparison(userId: number): Promise<PersonalComparisonResponse> {
+  const enabledRaw = await settingsRepo.getSetting('leaderboard_enabled');
+  if ((enabledRaw ?? 'true') !== 'true') {
+    return { available: false, reason: 'LEADERBOARD_DISABLED' };
+  }
+
+  const [meta, population] = await Promise.all([
+    getVersionMeta(),
+    repo.getCurrentRatingPopulation(),
+  ]);
+  const personal = population.find((entry) => entry.userId === userId);
+  if (!meta || !personal) return { available: false, reason: 'NOT_ON_LEADERBOARD' };
+  if (personal.rating <= 0) return { available: false, reason: 'NOT_RATED' };
+
+  const ratedPopulation = population.filter((entry) => entry.rating > 0);
+  const overallRatings = ratedPopulation.map((entry) => entry.rating);
+  const cohortRatings = personal.batchYear === null
+    ? []
+    : ratedPopulation
+      .filter((entry) => entry.batchYear === personal.batchYear)
+      .map((entry) => entry.rating);
+
+  return {
+    available: true,
+    generatedAt: meta.completedAt.toISOString(),
+    handle: personal.handle,
+    rating: personal.rating,
+    overall: summarizeComparison(overallRatings, personal.rating),
+    cohort: personal.batchYear === null
+      ? null
+      : {
+          batchYear: personal.batchYear,
+          ...summarizeComparison(cohortRatings, personal.rating),
+        },
+  };
 }
 
 // ---------------------------------------------------------------------------

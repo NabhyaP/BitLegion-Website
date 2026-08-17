@@ -13,7 +13,17 @@
  */
 import { enqueue, CfRateLimitError, CfUnavailableError } from './queue.ts';
 import { normalizeProfile, normalizeRatingChanges, normalizeSubmissions } from './normalize.ts';
-import type { CfProfile, CfRatingPoint, CfSubmission, CfApiEnvelope, CfRawUser, CfRawRatingChange, CfRawSubmission } from './types.ts';
+import type {
+  CfApiEnvelope,
+  CfContest,
+  CfProfile,
+  CfRatingPoint,
+  CfRawContest,
+  CfRawRatingChange,
+  CfRawSubmission,
+  CfRawUser,
+  CfSubmission,
+} from './types.ts';
 
 const CF_BASE = 'https://codeforces.com/api';
 const TIMEOUT_MS = 20_000;
@@ -88,5 +98,22 @@ export async function fetchSubmissionsPage(
       `${CF_BASE}/user.status?handle=${encodeURIComponent(handle)}&from=${from}&count=${count}`,
     );
     return normalizeSubmissions(result);
+  });
+}
+
+export async function fetchUpcomingContests(limit = 6): Promise<CfContest[]> {
+  return enqueue(async () => {
+    const result = await cfFetch<CfRawContest[]>(`${CF_BASE}/contest.list?gym=false`);
+    return result
+      .filter((contest) => contest.phase === 'BEFORE' && contest.startTimeSeconds !== undefined)
+      .sort((a, b) => a.startTimeSeconds! - b.startTimeSeconds!)
+      .slice(0, limit)
+      .map((contest) => ({
+        id: contest.id,
+        name: contest.name,
+        type: contest.type,
+        startsAt: contest.startTimeSeconds! * 1000,
+        durationSeconds: contest.durationSeconds,
+      }));
   });
 }

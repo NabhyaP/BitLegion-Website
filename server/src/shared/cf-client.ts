@@ -151,6 +151,24 @@ async function fetchCf<T>(url: string): Promise<T> {
         throw new CfUnavailableError(`CF HTTP ${resp.status}`);
       }
       if (!resp.ok) {
+        // Unknown handles are returned as a FAILED envelope with HTTP 400.
+        try {
+          const body = (await resp.json()) as CfEnvelope<unknown>;
+          const comment = body.comment ?? '';
+          if (
+            body.status === 'FAILED' &&
+            (comment.toLowerCase().includes('not found') ||
+              comment.toLowerCase().includes('handle') ||
+              comment.toLowerCase().includes('unknown'))
+          ) {
+            throw new CfHandleError('', comment);
+          }
+          if (body.status === 'FAILED' && comment.toLowerCase().includes('limit')) {
+            throw new CfRateLimitError();
+          }
+        } catch (error) {
+          if (error instanceof CfHandleError || error instanceof CfRateLimitError) throw error;
+        }
         // 4xx (other than 429) — not retried.
         throw new CfUnavailableError(`CF HTTP ${resp.status} (no retry)`);
       }

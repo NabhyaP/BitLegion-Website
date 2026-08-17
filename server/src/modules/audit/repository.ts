@@ -2,7 +2,7 @@ import type { Pool, PoolConnection } from 'mysql2/promise';
 import { pool as defaultPool } from '../../db/pool.ts';
 
 export type AuditEvent = {
-  actorUserId: number;
+  actorUserId: number | null;
   action: string;
   targetType?: string | null;
   targetId?: string | number | null;

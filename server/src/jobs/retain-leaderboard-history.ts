@@ -12,6 +12,7 @@
 
 import { pool } from '../db/pool.ts';
 import * as lbRepo from '../modules/leaderboards/repository.ts';
+import type { ResultSetHeader } from 'mysql2/promise';
 
 async function run(): Promise<void> {
   const startedAt = new Date();
@@ -28,17 +29,17 @@ async function run(): Promise<void> {
     await lbRepo.pruneRatingDaily();
 
     // 4. Delete expired link attempts.
-    const [expiredLinks] = await pool.query<any>(
+    const [expiredLinks] = await pool.query<ResultSetHeader>(
       `DELETE FROM codeforces_link_attempts WHERE expires_at < NOW()`,
     );
-    const deletedLinks = (expiredLinks as any).affectedRows ?? 0;
+    const deletedLinks = expiredLinks.affectedRows;
 
     // 5. Prune audit_events older than 24 months.
-    const [expiredAudit] = await pool.query<any>(
+    const [expiredAudit] = await pool.query<ResultSetHeader>(
       `DELETE FROM audit_events
         WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 MONTH)`,
     );
-    const deletedAudit = (expiredAudit as any).affectedRows ?? 0;
+    const deletedAudit = expiredAudit.affectedRows;
 
     const durationMs = Date.now() - startedAt.getTime();
     await pool.query(

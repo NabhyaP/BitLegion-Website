@@ -14,6 +14,7 @@ import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import express, { type Express } from 'express';
 import request from 'supertest';
+import type { RowDataPacket } from 'mysql2/promise';
 import { createApp } from '../server/src/app.ts';
 import { pool } from '../server/src/db/pool.ts';
 import { sessionMiddleware } from '../server/src/middleware/session.ts';
@@ -30,6 +31,20 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
+let csrfToken = '';
+
+async function issueCsrf(targetApp: Express, sessionCookie = ''): Promise<string> {
+  const csrfResponse = await request(targetApp)
+    .get('/api/v1/auth/csrf-token')
+    .set('Cookie', sessionCookie);
+  csrfToken = csrfResponse.body.csrfToken as string;
+  const setCookie = csrfResponse.headers['set-cookie'] as string | string[];
+  const csrfCookies = (Array.isArray(setCookie) ? setCookie : [setCookie])
+    .filter(Boolean)
+    .map((value) => value.split(';')[0]);
+  return [sessionCookie, ...csrfCookies].filter(Boolean).join('; ');
+}
+
 /** Sign in a test user and return a cookie string for subsequent requests. */
 async function signInAndGetCookie(app: Express, email: string): Promise<string> {
   // Create the user via service (populates DB), then simulate a session cookie.
@@ -43,7 +58,7 @@ async function signInAndGetCookie(app: Express, email: string): Promise<string> 
   });
 
   // Promote to ADMIN so we can test admin routes.
-  const [roleRow] = await pool.query<any[]>(`SELECT id FROM roles WHERE code = 'ADMIN'`);
+  const [roleRow] = await pool.query<RowDataPacket[]>(`SELECT id FROM roles WHERE code = 'ADMIN'`);
   await pool.query(`INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)`, [
     user.id,
     roleRow[0].id,
@@ -65,7 +80,7 @@ async function signInAndGetCookie(app: Express, email: string): Promise<string> 
   const loginRes = await request(testApp).post('/test-login');
   const setCookie = loginRes.headers['set-cookie'] as string | string[];
   const cookie = Array.isArray(setCookie) ? setCookie[0].split(';')[0] : setCookie.split(';')[0];
-  return cookie;
+  return issueCsrf(app, cookie);
 }
 
 /** Seed settings rows (may already exist from migration seed). */
@@ -94,6 +109,43 @@ beforeEach(async () => {
 });
 after(closeDb);
 
+test('Google sign-in redirects to a clear login error when OAuth is not configured', async () => {
+  const response = await request(app).get('/api/v1/auth/google/start').expect(302);
+  assert.equal(response.headers.location, '/login?error=oauth-not-configured');
+});
+
+test('admin can set and clear a member avatar URL and the change is audited', async () => {
+  const email = '100000000@cse.iiitp.ac.in';
+  const cookie = await signInAndGetCookie(app, email);
+  const [users] = await pool.query<RowDataPacket[]>('SELECT id FROM users WHERE college_email = ?', [email]);
+  const userId = Number(users[0]!.id);
+  const avatarUrl = 'https://images.example.test/member.png';
+
+  const updated = await request(app)
+    .patch(`/api/v1/admin/members/${userId}`)
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
+    .send({ avatarUrl })
+    .expect(200);
+  assert.equal(updated.body.data.avatarUrl, avatarUrl);
+  assert.equal(await countRows('audit_events', `action = 'member.edit'`), 1);
+
+  const rejected = await request(app)
+    .patch(`/api/v1/admin/members/${userId}`)
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
+    .send({ avatarUrl: 'javascript:alert(1)' });
+  assert.equal(rejected.status, 400);
+
+  const cleared = await request(app)
+    .patch(`/api/v1/admin/members/${userId}`)
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
+    .send({ avatarUrl: null })
+    .expect(200);
+  assert.equal(cleared.body.data.avatarUrl, null);
+});
+
 // ===========================================================================
 // Settings
 // ===========================================================================
@@ -112,11 +164,15 @@ test('GET /api/v1/settings/public reflects a disabled leaderboard', async () => 
   assert.equal(res.body.data.leaderboardEnabled, false);
 });
 
-test('PATCH /api/v1/admin/settings requires auth', async () => {
+test('PATCH /api/v1/admin/settings rejects an unauthenticated mutation', async () => {
+  const cookie = await issueCsrf(app);
   const res = await request(app)
     .patch('/api/v1/admin/settings')
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ announcement: 'hello' });
-  assert.equal(res.status, 401);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error.code, 'EBADCSRFTOKEN');
 });
 
 test('PATCH /api/v1/admin/settings updates announcement and writes audit row', async () => {
@@ -124,6 +180,7 @@ test('PATCH /api/v1/admin/settings updates announcement and writes audit row', a
   const res = await request(app)
     .patch('/api/v1/admin/settings')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ announcement: 'Welcome to BitLegion!' });
   assert.equal(res.status, 200);
   assert.equal(res.body.data.announcement, 'Welcome to BitLegion!');
@@ -135,6 +192,7 @@ test('PATCH /api/v1/admin/settings rejects leaderboardRefreshMinutes < 30', asyn
   const res = await request(app)
     .patch('/api/v1/admin/settings')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ leaderboardRefreshMinutes: 15 });
   assert.equal(res.status, 400);
 });
@@ -273,6 +331,55 @@ test('leaderboard ETag: second identical request returns 304', async () => {
   assert.equal(res2.status, 304);
 });
 
+test('rating trends return overall and batch average/median history', async () => {
+  const versionId = await seedActiveSnapshot();
+  const first = await seedLeaderboardEntry({ versionId, handle: 'trend-a', rating: 1400, batch: 2024 });
+  const second = await seedLeaderboardEntry({ versionId, handle: 'trend-b', rating: 1600, batch: 2024 });
+  await pool.query(
+    `INSERT INTO codeforces_rating_daily (user_id, snapshot_date, rating, max_rating) VALUES
+       (?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 1300, 1400),
+       (?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 1500, 1600),
+       (?, CURDATE(), 1400, 1400),
+       (?, CURDATE(), 1600, 1600)`,
+    [first.userId, second.userId, first.userId, second.userId],
+  );
+
+  const response = await request(app).get('/api/v1/leaderboards/codeforces/trends?days=90');
+  assert.equal(response.status, 200);
+  const overall = response.body.data.find((series: { batchYear: number | null }) => series.batchYear === null);
+  const batch = response.body.data.find((series: { batchYear: number | null }) => series.batchYear === 2024);
+  assert.deepEqual(overall.points.map((point: { average: number; median: number }) => [point.average, point.median]), [
+    [1400, 1400],
+    [1500, 1500],
+  ]);
+  assert.equal(batch.points[1].memberCount, 2);
+});
+
+test('personal comparison uses the signed-in member and active snapshot population', async () => {
+  const cookie = await signInAndGetCookie(app, '200000009@cse.iiitp.ac.in');
+  const [users] = await pool.query<RowDataPacket[]>(
+    `SELECT id FROM users WHERE college_email = '200000009@cse.iiitp.ac.in'`,
+  );
+  const userId = Number(users[0].id);
+  const versionId = await seedActiveSnapshot();
+  await pool.query(
+    `INSERT INTO leaderboard_entries
+       (version_id, user_id, position, handle, rating, max_rating, profile_updated_at)
+     VALUES (?, ?, 1, 'personal-user', 1600, 1700, NOW())`,
+    [versionId, userId],
+  );
+  await seedLeaderboardEntry({ versionId, handle: 'comparison-peer', rating: 1400, batch: 2024, position: 2 });
+
+  const response = await request(app)
+    .get('/api/v1/leaderboards/codeforces/me-comparison')
+    .set('Cookie', cookie);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.available, true);
+  assert.equal(response.body.overall.rank, 1);
+  assert.equal(response.body.overall.average, 1500);
+  assert.equal(response.body.overall.differenceFromAverage, 100);
+});
+
 test('leaderboard disabled: returns {disabled:true} for public, previewOnly for admin', async () => {
   await pool.query(`UPDATE settings SET svalue = 'false' WHERE skey = 'leaderboard_enabled'`);
   const versionId = await seedActiveSnapshot();
@@ -383,11 +490,38 @@ test('GET /api/v1/teams returns empty array when no teams', async () => {
   assert.deepEqual(res.body.data, []);
 });
 
+test('admin can manage course codes exposed by the public endpoint', async () => {
+  const cookie = await signInAndGetCookie(app, '300000099@cse.iiitp.ac.in');
+  const created = await request(app)
+    .post('/api/v1/admin/course-codes')
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
+    .send({ code: '17', branch: 'IT', name: 'Information Technology' });
+  assert.equal(created.status, 201);
+
+  const publicList = await request(app).get('/api/v1/course-codes');
+  assert.ok(publicList.body.data.some((course: { code: string }) => course.code === '17'));
+
+  const updated = await request(app)
+    .patch('/api/v1/admin/course-codes/17')
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
+    .send({ branch: 'IT', name: 'Information Technology Engineering' });
+  assert.equal(updated.body.data.name, 'Information Technology Engineering');
+
+  const removed = await request(app)
+    .delete('/api/v1/admin/course-codes/17')
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken);
+  assert.equal(removed.status, 204);
+});
+
 test('admin POST /api/v1/admin/teams creates team and writes audit row', async () => {
   const cookie = await signInAndGetCookie(app, '300000001@cse.iiitp.ac.in');
   const res = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Core Team', displayOrder: 1 });
   assert.equal(res.status, 201);
   assert.equal(res.body.data.name, 'Core Team');
@@ -400,12 +534,14 @@ test('admin PATCH /api/v1/admin/teams/:id updates team and audits', async () => 
   const create = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Old Name', displayOrder: 0 });
   const teamId = create.body.data.id;
 
   const res = await request(app)
     .patch(`/api/v1/admin/teams/${teamId}`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'New Name', displayOrder: 2 });
   assert.equal(res.status, 200);
   assert.equal(res.body.data.name, 'New Name');
@@ -417,6 +553,7 @@ test('admin DELETE /api/v1/admin/teams/:id removes team and its members', async 
   const create = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'ToDelete', displayOrder: 0 });
   const teamId = create.body.data.id;
 
@@ -424,13 +561,15 @@ test('admin DELETE /api/v1/admin/teams/:id removes team and its members', async 
   await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Jane', roleTitle: 'Dev', displayOrder: 0 });
 
   assert.equal(await countRows('club_team_members'), 1);
 
   const del = await request(app)
     .delete(`/api/v1/admin/teams/${teamId}`)
-    .set('Cookie', cookie);
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken);
   assert.equal(del.status, 204);
   assert.equal(await countRows('club_teams'), 0);
   assert.equal(await countRows('club_team_members'), 0, 'cascade delete removes members');
@@ -442,12 +581,14 @@ test('admin POST /api/v1/admin/teams/:id/members creates member with audit', asy
   const team = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Dev Team', displayOrder: 0 });
   const teamId = team.body.data.id;
 
   const res = await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Alice', roleTitle: 'Lead', cfHandle: 'alice_cf', displayOrder: 1 });
   assert.equal(res.status, 201);
   assert.equal(res.body.data.name, 'Alice');
@@ -460,18 +601,21 @@ test('admin PATCH /api/v1/admin/teams/:id/members/:mid updates member', async ()
   const team = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'A Team', displayOrder: 0 });
   const teamId = team.body.data.id;
 
   const member = await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Bob', roleTitle: 'Member', displayOrder: 0 });
   const memberId = member.body.data.id;
 
   const res = await request(app)
     .patch(`/api/v1/admin/teams/${teamId}/members/${memberId}`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ roleTitle: 'Senior Member' });
   assert.equal(res.status, 200);
   assert.equal(res.body.data.roleTitle, 'Senior Member');
@@ -483,18 +627,21 @@ test('admin DELETE /api/v1/admin/teams/:id/members/:mid removes member', async (
   const team = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'X Team', displayOrder: 0 });
   const teamId = team.body.data.id;
 
   const member = await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Carol', roleTitle: 'Dev', displayOrder: 0 });
   const memberId = member.body.data.id;
 
   const res = await request(app)
     .delete(`/api/v1/admin/teams/${teamId}/members/${memberId}`)
-    .set('Cookie', cookie);
+    .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken);
   assert.equal(res.status, 204);
   assert.equal(await countRows('club_team_members'), 0);
   assert.equal(await countRows('audit_events', `action = 'team.member.delete'`), 1);
@@ -505,15 +652,18 @@ test('GET /api/v1/teams returns teams with members nested by displayOrder', asyn
   const team = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Dev Team', displayOrder: 0 });
   const teamId = team.body.data.id;
   await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Z Member', roleTitle: 'Dev', displayOrder: 2 });
   await request(app)
     .post(`/api/v1/admin/teams/${teamId}/members`)
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'A Member', roleTitle: 'Lead', displayOrder: 1 });
 
   const res = await request(app).get('/api/v1/teams');
@@ -534,7 +684,7 @@ test('admin team routes require ADMIN role', async () => {
   const memberApp = express();
   memberApp.use(sessionMiddleware());
   memberApp.post('/test-login', async (req, _res, next) => {
-    const [rows] = await pool.query<any[]>(
+    const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT id FROM users WHERE college_email = '400000001@cse.iiitp.ac.in'`,
     );
     req.session.userId = rows[0].id;
@@ -546,11 +696,13 @@ test('admin team routes require ADMIN role', async () => {
   });
 
   const loginRes = await request(memberApp).post('/test-login');
-  const cookie = (loginRes.headers['set-cookie'] as string[])[0].split(';')[0];
+  const sessionCookie = (loginRes.headers['set-cookie'] as string[])[0].split(';')[0];
+  const cookie = await issueCsrf(app, sessionCookie);
 
   const res = await request(app)
     .post('/api/v1/admin/teams')
     .set('Cookie', cookie)
+    .set('x-csrf-token', csrfToken)
     .send({ name: 'Forbidden', displayOrder: 0 });
   assert.equal(res.status, 403);
 });

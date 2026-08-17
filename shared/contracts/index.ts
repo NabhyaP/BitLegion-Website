@@ -86,6 +86,45 @@ export type LeaderboardResponse = {
   meta: LeaderboardMeta;
 } | { disabled: true };
 
+export type RatingTrendPoint = {
+  date: string;
+  average: number;
+  median: number;
+  memberCount: number;
+};
+
+export type RatingTrendSeries = {
+  batchYear: number | null;
+  label: string;
+  points: RatingTrendPoint[];
+};
+
+export type RatingTrendsResponse = {
+  data: RatingTrendSeries[];
+  meta: { generatedAt: string; days: number };
+} | { disabled: true };
+
+export type ComparisonGroup = {
+  rank: number;
+  total: number;
+  percentile: number;
+  average: number;
+  median: number;
+  differenceFromAverage: number;
+};
+
+export type PersonalComparisonResponse = {
+  available: true;
+  generatedAt: string;
+  handle: string;
+  rating: number;
+  overall: ComparisonGroup;
+  cohort: (ComparisonGroup & { batchYear: number }) | null;
+} | {
+  available: false;
+  reason: 'LEADERBOARD_DISABLED' | 'NOT_ON_LEADERBOARD' | 'NOT_RATED';
+};
+
 // ---------------------------------------------------------------------------
 // Public settings (Phase 3 / Phase 4)
 // ---------------------------------------------------------------------------
@@ -93,6 +132,12 @@ export type LeaderboardResponse = {
 export type PublicSettingsResponse = {
   announcement: string;        // empty string = no banner
   leaderboardEnabled: boolean;
+};
+
+export type CourseCodeResponse = {
+  code: string;
+  branch: string;
+  name: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -203,7 +248,7 @@ export type HandleIssueResponse = {
 
 export type AuditEventResponse = {
   id: number;
-  actorUserId: number;
+  actorUserId: number | null;
   actorName: string | null;
   action: string;
   targetType: string | null;

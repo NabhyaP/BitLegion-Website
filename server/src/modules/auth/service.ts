@@ -1,6 +1,5 @@
 // Steps 2–8 of the §B1 callback, as one testable function. Token/state/nonce/PKCE verification
 // (step 1) happens in the controller, which hands verified claims to signInWithGoogleClaims.
-import type { PoolConnection } from 'mysql2/promise';
 import { pool } from '../../db/pool.ts';
 import { env, superadminEmails } from '../../config/env.ts';
 import { isCollegeEmail, parseCollegeEmail } from '../users/rollno.ts';

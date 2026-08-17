@@ -9,6 +9,7 @@ import type {
   TagCount,
   CalendarDay,
 } from './types.ts';
+import { localDateKey } from '../utils/date.ts';
 
 const TOP_TAGS = 10;
 const ACCEPTED = 'OK';
@@ -42,7 +43,7 @@ export function computeAnalytics(submissions: CfSubmission[]): AnalyticsResult {
     diffMap.set(bucket, (diffMap.get(bucket) ?? 0) + 1);
 
     // Practice calendar — UTC date of the submission
-    const date = new Date(s.createdAt).toISOString().slice(0, 10);
+    const date = localDateKey(new Date(s.createdAt));
     dayMap.set(date, (dayMap.get(date) ?? 0) + 1);
   }
 

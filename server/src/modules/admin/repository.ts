@@ -4,7 +4,7 @@
  */
 import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { pool as defaultPool } from '../../db/pool.ts';
-import type { UserStatus, RoleCode } from '../users/types.ts';
+import type { UserStatus } from '../users/types.ts';
 
 type Db = Pool | PoolConnection;
 
@@ -116,6 +116,7 @@ export async function adminUpdateUser(
   userId: number,
   patch: {
     displayName?: string;
+    avatarUrl?: string | null;
     rollNo?: string | null;
     batchYear?: number | null;
     branch?: string | null;
@@ -128,6 +129,7 @@ export async function adminUpdateUser(
   const vals: unknown[] = [];
   const map: Record<string, string> = {
     displayName: 'display_name',
+    avatarUrl: 'avatar_url',
     rollNo: 'roll_no',
     batchYear: 'batch_year',
     branch: 'branch',
@@ -287,7 +289,7 @@ export async function resetSolvedState(userId: number, db: Db = defaultPool): Pr
 
 export type AuditEventRow = {
   id: number;
-  actorUserId: number;
+  actorUserId: number | null;
   actorName: string | null;
   action: string;
   targetType: string | null;
@@ -336,7 +338,7 @@ export async function listAuditEvents(opts: {
     total,
     rows: rows.map((r) => ({
       id: Number(r.id),
-      actorUserId: Number(r.actor_user_id),
+      actorUserId: r.actor_user_id != null ? Number(r.actor_user_id) : null,
       actorName: (r.actor_name as string | null) ?? null,
       action: r.action as string,
       targetType: (r.target_type as string | null) ?? null,

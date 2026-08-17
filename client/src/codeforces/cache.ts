@@ -12,8 +12,8 @@ import Dexie, { type Table } from 'dexie';
 import type { CfProfile, CfRatingPoint, CfSubmission, CfCacheMeta } from './types.ts';
 import { SCHEMA_VERSION } from './normalize.ts';
 
-const STALE_MS = 5 * 60 * 1000;       // 15 min — start revalidation
-const MAX_STALE_MS = 15 * 60 * 1000;   // 30 min — upper bound of stale-while-revalidate band
+const STALE_MS = 15 * 60 * 1000;
+const MAX_STALE_MS = 30 * 60 * 1000;
 const SUBMISSION_CAP = 2000;           // §C "first visit pages up to 2,000-cap"
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,19 @@ class MemoryFallback {
   upsertSubmissions(handle: string, subs: CfSubmission[]) {
     if (!this._submissions.has(handle)) this._submissions.set(handle, new Map());
     const m = this._submissions.get(handle)!;
-    for (const s of subs) m.set(s.submissionId, s);
+    let added = 0;
+    for (const submission of subs) {
+      if (!m.has(submission.submissionId)) added++;
+      m.set(submission.submissionId, submission);
+    }
+    const newest = [...m.values()]
+      .sort((a, b) => b.submissionId - a.submissionId)
+      .slice(0, SUBMISSION_CAP);
+    this._submissions.set(
+      handle,
+      new Map(newest.map((submission) => [submission.submissionId, submission])),
+    );
+    return added;
   }
   clearHandle(handle: string) {
     this._meta.delete(handle);
@@ -210,13 +222,25 @@ export async function upsertSubmissions(
 ): Promise<number> {
   await checkStorage();
   if (_fallback) {
-    const before = _fallback.getSubmissions(handle).length;
-    _fallback.upsertSubmissions(handle, incoming);
-    return _fallback.getSubmissions(handle).length - before;
+    const added = _fallback.upsertSubmissions(handle, incoming);
+    const retained = _fallback.getSubmissions(handle).length;
+    const maxId = Math.max(0, ...incoming.map((submission) => submission.submissionId));
+    const meta = await ensureMeta(handle);
+    await setMeta(handle, {
+      ...meta,
+      submissionsFetchedAt: Date.now(),
+      lastSubmissionId: Math.max(meta.lastSubmissionId, maxId),
+      coverage: { complete: retained < SUBMISSION_CAP, retainedSubmissionCount: retained },
+    });
+    return added;
   }
 
   const db = getDb();
   const withHandle = incoming.map((s) => ({ ...s, handle }));
+  const existing = await db.submissions.bulkGet(
+    withHandle.map((submission) => submission.submissionId),
+  );
+  const added = existing.filter((submission) => submission === undefined).length;
 
   // Use bulkPut — existing rows with same submissionId are overwritten (idempotent)
   await db.submissions.bulkPut(withHandle);
@@ -245,7 +269,7 @@ export async function upsertSubmissions(
     },
   });
 
-  return incoming.filter((s) => !all.some((e) => e.submissionId === s.submissionId)).length;
+  return added;
 }
 
 // ---------------------------------------------------------------------------

@@ -12,9 +12,9 @@ import { Router } from 'express';
 import * as client from 'openid-client';
 import { env } from '../../config/env.ts';
 import { requireAuth, requireRecentAuth } from '../../middleware/auth.ts';
-import { badRequest } from '../../shared/errors.ts';
 import * as repo from './repository.ts';
 import { linkCfHandle, unlinkCfHandle } from './service.ts';
+import { spawnJob } from '../../shared/job-runner.ts';
 
 // ---------------------------------------------------------------------------
 // CF OIDC discovery (cached for the process lifetime, like the Google config).
@@ -47,6 +47,16 @@ function cfConfig(): Promise<client.Configuration> {
 }
 
 const callbackUri = () => new URL(CALLBACK_PATH, env.APP_URL).toString();
+
+async function requestLeaderboardRefresh(): Promise<void> {
+  try {
+    await spawnJob('refresh-codeforces-leaderboard');
+  } catch (error) {
+    console.error(
+      `[cf-link] could not trigger leaderboard refresh: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Router
@@ -134,6 +144,7 @@ cfLinksRouter.get('/link/callback', async (req, res) => {
 
     // 6. Link (or re-link) in a transaction; audit inside.
     await linkCfHandle(userId, rawHandle, req.requestId ?? null);
+    await requestLeaderboardRefresh();
 
     // §B2: redirect to dashboard with a success hint so the client starts
     // its IndexedDB fetch cycle.
@@ -152,6 +163,7 @@ cfLinksRouter.get('/link/callback', async (req, res) => {
 cfLinksRouter.delete('/link', requireAuth, requireRecentAuth, async (req, res, next) => {
   try {
     await unlinkCfHandle(req.user!.id, req.requestId ?? null);
+    await requestLeaderboardRefresh();
     // §B2: client should clear IndexedDB for the old handle after receiving 204.
     res.status(204).end();
   } catch (err) {

@@ -1,6 +1,7 @@
 // Integration-test harness. Requires a throwaway MySQL — see tests/README.md.
 // Env: DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME must point at a DISPOSABLE database.
 import { pool } from '../../server/src/db/pool.ts';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 /** Wipe all data between tests, keeping the schema (and the roles seed). */
 export async function resetDb(): Promise<void> {
@@ -24,11 +25,32 @@ export async function resetDb(): Promise<void> {
     'user_roles',
     'users',
     'sessions',
+    'job_runs',
   ]) {
     await pool.query(`TRUNCATE TABLE ${t}`).catch(() => {
       /* table may not exist yet (e.g. sessions before first login, or future phases) */
     });
   }
+  await pool.query(
+    `INSERT INTO settings (skey, svalue, updated_by) VALUES
+       ('leaderboard_enabled', 'true', NULL),
+       ('announcement', '', NULL),
+       ('leaderboard_refresh_minutes', '60', NULL)
+     ON DUPLICATE KEY UPDATE svalue = VALUES(svalue), updated_by = NULL`,
+  ).catch(() => {
+    /* settings is unavailable before migration 009 */
+  });
+  await pool.query(`DELETE FROM course_codes WHERE code NOT IN ('15', '16')`).catch(() => {
+    /* course_codes is unavailable before migration 003 */
+  });
+  await pool.query(
+    `INSERT INTO course_codes (code, branch, name) VALUES
+       ('15', 'CSE', 'Computer Science and Engineering'),
+       ('16', 'ECE', 'Electronics and Communication Engineering')
+     ON DUPLICATE KEY UPDATE branch = VALUES(branch), name = VALUES(name)`,
+  ).catch(() => {
+    /* course_codes is unavailable before migration 003 */
+  });
   await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 }
 
@@ -62,13 +84,13 @@ export async function closeDb(): Promise<void> {
 }
 
 export async function countRows(table: string, where = '1=1'): Promise<number> {
-  const [rows] = await pool.query<any[]>(`SELECT COUNT(*) c FROM ${table} WHERE ${where}`);
+  const [rows] = await pool.query<RowDataPacket[]>(`SELECT COUNT(*) c FROM ${table} WHERE ${where}`);
   return Number(rows[0].c);
 }
 
 /** Insert a pre-provisioned member the way an admin CSV import will (google_sub NULL, PENDING). */
 export async function seedPreProvisioned(email: string, name = 'Seeded Member'): Promise<number> {
-  const [res] = await pool.query<any>(
+  const [res] = await pool.query<ResultSetHeader>(
     `INSERT INTO users (college_email, display_name, status) VALUES (?,?,'PENDING')`,
     [email, name],
   );
@@ -103,7 +125,7 @@ export async function seedLeaderboardEntry(opts: {
   const show = opts.showInLeaderboard !== false ? 1 : 0;
   const status = opts.status ?? 'ACTIVE';
 
-  const [userRes] = await pool.query<any>(
+  const [userRes] = await pool.query<ResultSetHeader>(
     `INSERT INTO users (college_email, display_name, batch_year, branch, status, show_in_leaderboard)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [email, displayName, opts.batch ?? 2024, opts.branch ?? 'CSE', status, show],
@@ -136,7 +158,7 @@ export async function seedLeaderboardEntry(opts: {
 
 /** Create a leaderboard version + activate it. Returns versionId. */
 export async function seedActiveSnapshot(): Promise<number> {
-  const [vRes] = await pool.query<any>(
+  const [vRes] = await pool.query<ResultSetHeader>(
     `INSERT INTO leaderboard_versions (status, completed_at, handles_requested, handles_updated)
      VALUES ('READY', NOW(), 1, 1)`,
   );

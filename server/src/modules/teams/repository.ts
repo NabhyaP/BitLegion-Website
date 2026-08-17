@@ -53,10 +53,16 @@ export async function getMembersForTeams(
   if (teamIds.length === 0) return [];
   const placeholders = teamIds.map(() => '?').join(',');
   const [rows] = await db.query<RowDataPacket[]>(
-    `SELECT id, team_id, user_id, name, role_title, cf_handle, photo_url, display_order
-       FROM club_team_members
-      WHERE team_id IN (${placeholders})
-      ORDER BY display_order ASC, id ASC`,
+    `SELECT tm.id, tm.team_id, tm.user_id,
+            COALESCE(u.display_name, tm.name) AS name,
+            tm.role_title,
+            COALESCE(CASE WHEN ca.status = 'ACTIVE' THEN ca.handle END, tm.cf_handle) AS cf_handle,
+            COALESCE(tm.photo_url, u.avatar_url) AS photo_url, tm.display_order
+       FROM club_team_members tm
+       LEFT JOIN users u ON u.id = tm.user_id
+       LEFT JOIN codeforces_accounts ca ON ca.user_id = tm.user_id
+      WHERE tm.team_id IN (${placeholders})
+      ORDER BY tm.display_order ASC, tm.id ASC`,
     teamIds,
   );
   return rows.map(toMember);
@@ -67,8 +73,15 @@ export async function getMemberById(
   db: Db = defaultPool,
 ): Promise<TeamMember | null> {
   const [rows] = await db.query<RowDataPacket[]>(
-    `SELECT id, team_id, user_id, name, role_title, cf_handle, photo_url, display_order
-       FROM club_team_members WHERE id = ?`,
+    `SELECT tm.id, tm.team_id, tm.user_id,
+            COALESCE(u.display_name, tm.name) AS name,
+            tm.role_title,
+            COALESCE(CASE WHEN ca.status = 'ACTIVE' THEN ca.handle END, tm.cf_handle) AS cf_handle,
+            COALESCE(tm.photo_url, u.avatar_url) AS photo_url, tm.display_order
+       FROM club_team_members tm
+       LEFT JOIN users u ON u.id = tm.user_id
+       LEFT JOIN codeforces_accounts ca ON ca.user_id = tm.user_id
+      WHERE tm.id = ?`,
     [memberId],
   );
   return rows[0] ? toMember(rows[0]) : null;

@@ -6,14 +6,38 @@
  * Supports ETag / 304 (§F "ETag {snapshotId}:{queryHash}").
  */
 import { Router } from 'express';
-import { leaderboardQuerySchema } from './schemas.ts';
+import { leaderboardQuerySchema, ratingTrendsQuerySchema } from './schemas.ts';
 import * as service from './service.ts';
 import { badRequest } from '../../shared/errors.ts';
 import type { RoleCode } from '../users/types.ts';
+import { optionalAuth, requireAuth } from '../../middleware/auth.ts';
 
 export const leaderboardRouter = Router();
 
-leaderboardRouter.get('/codeforces', async (req, res, next) => {
+leaderboardRouter.get('/codeforces/trends', async (req, res, next) => {
+  try {
+    const parsed = ratingTrendsQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw badRequest('Invalid trend range.');
+    const result = await service.getRatingTrends(parsed.data.days);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+leaderboardRouter.get('/codeforces/me-comparison', requireAuth, async (req, res, next) => {
+  try {
+    const result = await service.getPersonalComparison(req.user!.id);
+    res.set('Cache-Control', 'private, no-store');
+    res.vary('Cookie');
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+leaderboardRouter.get('/codeforces', optionalAuth, async (req, res, next) => {
   try {
     // Parse + validate query params
     const parsed = leaderboardQuerySchema.safeParse(req.query);
@@ -50,7 +74,7 @@ leaderboardRouter.get('/codeforces', async (req, res, next) => {
 
     // Disabled sentinel — no ETag needed
     if ('disabled' in result) {
-      res.set('Cache-Control', 'public, max-age=60');
+      res.set('Cache-Control', isAdmin ? 'private, no-store' : 'public, max-age=60');
       return res.json(result);
     }
 
@@ -59,7 +83,8 @@ leaderboardRouter.get('/codeforces', async (req, res, next) => {
     const ifNoneMatch = req.headers['if-none-match'];
 
     res.set('ETag', etag);
-    res.set('Cache-Control', 'public, max-age=60');
+    res.set('Cache-Control', isAdmin ? 'private, no-store' : 'public, max-age=60');
+    if (isAdmin) res.vary('Cookie');
 
     if (ifNoneMatch === etag) {
       return res.status(304).end();

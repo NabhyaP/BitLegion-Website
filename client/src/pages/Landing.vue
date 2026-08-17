@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import AsciiIntro from '@/components/AsciiIntro.vue';
 import AsciiLogo from '@/components/AsciiLogo.vue';
+import AccountMenu from '@/components/AccountMenu.vue';
 import { useSessionStore } from '@/stores/session.ts';
 
 const session = useSessionStore();
@@ -25,9 +26,8 @@ function introDone() {
       <nav>
         <RouterLink to="/leaderboard">Leaderboard</RouterLink>
         <RouterLink to="/teams">Teams</RouterLink>
-        <RouterLink :to="session.signedIn ? '/dashboard' : '/login'">
-          {{ session.signedIn ? 'Dashboard' : 'Sign in' }}
-        </RouterLink>
+        <AccountMenu v-if="session.signedIn" />
+        <RouterLink v-else to="/login">Sign in</RouterLink>
       </nav>
     </header>
 

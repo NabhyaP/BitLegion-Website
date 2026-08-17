@@ -17,6 +17,7 @@
 import { doubleCsrf } from 'csrf-csrf';
 import type { RequestHandler } from 'express';
 import { env } from '../config/env.ts';
+import { hasValidJobTriggerSecret } from '../shared/job-trigger.ts';
 
 const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
   getSecret: () => env.SESSION_SECRET,
@@ -39,7 +40,7 @@ const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
 
 /** GET /api/v1/auth/csrf-token — issue a CSRF token for this session. */
 export const csrfTokenHandler: RequestHandler = (req, res) => {
-  const token = generateCsrfToken(req, res, { overwrite: true });
+  const token = generateCsrfToken(req, res);
   res.json({ csrfToken: token });
 };
 
@@ -56,6 +57,11 @@ export const csrfProtection: RequestHandler = (req, res, next) => {
     '/api/v1/codeforces/link/callback',
   ];
   if (excluded.includes(path)) return next();
+
+  if (
+    path === '/api/v1/admin/jobs/leaderboard/retry'
+    && hasValidJobTriggerSecret(req)
+  ) return next();
 
   return doubleCsrfProtection(req, res, next);
 };

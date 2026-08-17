@@ -48,6 +48,16 @@ export type CfRawSubmission = {
   programmingLanguage: string;
 };
 
+export type CfRawContest = {
+  id: number;
+  name: string;
+  type: string;
+  phase: string;
+  durationSeconds: number;
+  startTimeSeconds?: number;
+  relativeTimeSeconds?: number;
+};
+
 // ---------------------------------------------------------------------------
 // Normalized shapes stored in IndexedDB
 // ---------------------------------------------------------------------------
@@ -69,6 +79,14 @@ export type CfRatingPoint = {
   timeSeconds: number;    // epoch s
   oldRating: number;
   newRating: number;
+};
+
+export type CfContest = {
+  id: number;
+  name: string;
+  type: string;
+  startsAt: number;
+  durationSeconds: number;
 };
 
 /** Normalized submission — stored per handle. */
@@ -112,6 +130,7 @@ export type FetchStatus =
   | 'loading'
   | 'revalidating'   // serving cached data, background refresh in progress
   | 'success'
+  | 'partial'
   | 'rate-limited'
   | 'cf-unavailable'
   | 'error';
@@ -132,14 +151,17 @@ export type CfHandleState = {
 
 export type WorkerRequest = {
   type: 'compute';
+  requestId: number;
   submissions: CfSubmission[];
 };
 
 export type WorkerResponse = {
   type: 'result';
+  requestId: number;
   result: AnalyticsResult;
 } | {
   type: 'error';
+  requestId: number;
   message: string;
 };
 

@@ -245,6 +245,59 @@ export async function upsertRatingDaily(
   );
 }
 
+export type RatingHistoryRow = {
+  date: string;
+  batchYear: number | null;
+  rating: number;
+};
+
+export async function getRatingHistory(
+  days: number,
+  db: Db = defaultPool,
+): Promise<RatingHistoryRow[]> {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT d.snapshot_date, u.batch_year, d.rating
+       FROM codeforces_rating_daily d
+       JOIN users u ON u.id = d.user_id
+      WHERE d.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        AND u.status = 'ACTIVE'
+        AND u.show_in_leaderboard = 1
+        AND d.rating > 0
+      ORDER BY d.snapshot_date ASC, u.batch_year DESC, d.user_id ASC`,
+    [days],
+  );
+  return rows.map((row) => ({
+    date: new Date(row.snapshot_date).toISOString().slice(0, 10),
+    batchYear: row.batch_year != null ? Number(row.batch_year) : null,
+    rating: Number(row.rating),
+  }));
+}
+
+export type CurrentRatingRow = {
+  userId: number;
+  handle: string;
+  batchYear: number | null;
+  rating: number;
+};
+
+export async function getCurrentRatingPopulation(db: Db = defaultPool): Promise<CurrentRatingRow[]> {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT le.user_id, le.handle, u.batch_year, le.rating
+       FROM leaderboard_active la
+       JOIN leaderboard_entries le ON le.version_id = la.version_id
+       JOIN users u ON u.id = le.user_id
+      WHERE la.id = 1
+        AND u.status = 'ACTIVE'
+        AND u.show_in_leaderboard = 1`,
+  );
+  return rows.map((row) => ({
+    userId: Number(row.user_id),
+    handle: row.handle as string,
+    batchYear: row.batch_year != null ? Number(row.batch_year) : null,
+    rating: Number(row.rating),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Retention helpers (§E4)
 // ---------------------------------------------------------------------------
@@ -293,6 +346,7 @@ export type LeaderboardCursor = {
   maxRating: number;
   solvedCount: number | null;
   handle: string;
+  offset: number;
 };
 
 /** One row returned by queryLeaderboard (before contract mapping). */
@@ -360,9 +414,8 @@ export async function queryLeaderboard(
     orderBy = 'ISNULL(le.solved_count) ASC, le.solved_count DESC, le.rating DESC, le.handle ASC';
     if (cursor) {
       if (cursor.solvedCount === null) {
-        // previous page ended in NULL solved_count rows; cursor by handle only
-        cursorWhere = `AND (ISNULL(le.solved_count) = 1 AND le.handle > ?)`;
-        params.push(cursor.handle);
+        cursorWhere = `AND (ISNULL(le.solved_count) = 1 AND (le.rating < ? OR (le.rating = ? AND le.handle > ?)))`;
+        params.push(cursor.rating, cursor.rating, cursor.handle);
       } else {
         cursorWhere = `AND (ISNULL(le.solved_count) = 1 OR (le.solved_count < ?) OR (le.solved_count = ? AND le.rating < ?) OR (le.solved_count = ? AND le.rating = ? AND le.handle > ?))`;
         params.push(cursor.solvedCount, cursor.solvedCount, cursor.rating, cursor.solvedCount, cursor.rating, cursor.handle);
@@ -415,7 +468,6 @@ export async function queryLeaderboard(
           LIMIT 1
        ) AS rating_change_30d
      FROM leaderboard_entries le
-     JOIN leaderboard_active la ON la.version_id = le.version_id
      JOIN users u ON u.id = le.user_id
      WHERE le.version_id = ?
        AND u.show_in_leaderboard = 1
@@ -486,8 +538,7 @@ export async function getActiveEntryByHandle(
      FROM leaderboard_entries le
      JOIN leaderboard_active la ON la.version_id = le.version_id
      JOIN users u ON u.id = le.user_id
-     JOIN codeforces_accounts ca ON ca.user_id = le.user_id
-     WHERE ca.normalized_handle = ?
+      WHERE LOWER(le.handle) = ?
        AND le.version_id = la.version_id
        AND u.show_in_leaderboard = 1
        AND u.status = 'ACTIVE'
@@ -530,7 +581,9 @@ export function decodeCursor(token: string): LeaderboardCursor | null {
       raw === null ||
       typeof (raw as Record<string, unknown>).rating !== 'number' ||
       typeof (raw as Record<string, unknown>).maxRating !== 'number' ||
-      typeof (raw as Record<string, unknown>).handle !== 'string'
+      typeof (raw as Record<string, unknown>).handle !== 'string' ||
+      ((raw as Record<string, unknown>).offset !== undefined
+        && typeof (raw as Record<string, unknown>).offset !== 'number')
     ) {
       return null;
     }
@@ -540,6 +593,7 @@ export function decodeCursor(token: string): LeaderboardCursor | null {
       maxRating: obj.maxRating as number,
       solvedCount: obj.solvedCount != null ? (obj.solvedCount as number) : null,
       handle: obj.handle as string,
+      offset: typeof obj.offset === 'number' && obj.offset >= 0 ? obj.offset : 0,
     };
   } catch {
     return null;

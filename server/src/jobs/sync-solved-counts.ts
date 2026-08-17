@@ -13,7 +13,7 @@ import { env } from '../config/env.ts';
 import { withLock } from '../shared/lock.ts';
 import * as cf from '../shared/cf-client.ts';
 import { CfHandleError, CfRateLimitError } from '../shared/cf-client.ts';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 const LOCK_NAME = 'bitlegion:cf-solved';
 
@@ -48,38 +48,6 @@ async function fetchUsersToSync(limit: number): Promise<SyncUser[]> {
   }));
 }
 
-/** Persist solved delta for one user (idempotent via INSERT IGNORE). */
-async function flushSolvedDelta(
-  userId: number,
-  newKeys: string[],
-  newLastSubmissionId: number,
-  solvedDelta: number,
-): Promise<void> {
-  if (newKeys.length > 0) {
-    // Bulk INSERT IGNORE in chunks of 500.
-    const CHUNK = 500;
-    for (let i = 0; i < newKeys.length; i += CHUNK) {
-      const chunk = newKeys.slice(i, i + CHUNK);
-      const placeholders = chunk.map(() => '(?,?)').join(',');
-      const values = chunk.flatMap((k) => [userId, k]);
-      await pool.query(
-        `INSERT IGNORE INTO codeforces_solved_problems (user_id, problem_key) VALUES ${placeholders}`,
-        values,
-      );
-    }
-  }
-
-  await pool.query(
-    `UPDATE codeforces_solved_state
-        SET last_submission_id = GREATEST(last_submission_id, ?),
-            solved_count = solved_count + ?,
-            last_synced_at = NOW(),
-            last_error = NULL
-      WHERE user_id = ?`,
-    [newLastSubmissionId, solvedDelta, userId],
-  );
-}
-
 async function markSolvedError(userId: number, error: string): Promise<void> {
   await pool.query(
     `UPDATE codeforces_solved_state SET last_error = ? WHERE user_id = ?`,
@@ -109,7 +77,7 @@ async function insertJobRun(
   detail: object | null,
   startedAt: Date,
 ): Promise<number> {
-  const [res] = await pool.query<any>(
+  const [res] = await pool.query<ResultSetHeader>(
     `INSERT INTO job_runs (job_code, status, started_at, finished_at, duration_ms, detail)
      VALUES ('solved-sync', ?, ?,
              IF(? = 'RUNNING', NULL, NOW()),
@@ -191,33 +159,22 @@ async function syncUser(user: SyncUser): Promise<{ result: SyncResult; cfCalls: 
     // De-dup keys within this run first (a user may have solved same problem multiple times).
     const uniqueKeys = [...new Set(newKeys)];
 
-    // We can't get exact "actually new" count without checking existing rows,
-    // but INSERT IGNORE gives us that via affectedRows. Fetch delta via a transaction.
+    // INSERT IGNORE and the counter update commit together. affectedRows is the
+    // exact number of newly inserted problem keys, including under retries.
     const conn = await pool.getConnection();
     try {
-      // Count pre-existing keys to compute accurate delta.
+      await conn.beginTransaction();
       let actualDelta = 0;
       const CHUNK = 500;
-      for (let i = 0; i < uniqueKeys.length; i += CHUNK) {
-        const chunk = uniqueKeys.slice(i, i + CHUNK);
-        const placeholders = chunk.map(() => '?').join(',');
-        const [existing] = await conn.query<RowDataPacket[]>(
-          `SELECT problem_key FROM codeforces_solved_problems
-            WHERE user_id = ? AND problem_key IN (${placeholders})`,
-          [user.userId, ...chunk],
-        );
-        actualDelta += chunk.length - existing.length;
-      }
-
-      // INSERT IGNORE the new keys.
       if (uniqueKeys.length > 0) {
         for (let i = 0; i < uniqueKeys.length; i += CHUNK) {
           const chunk = uniqueKeys.slice(i, i + CHUNK);
           const ph = chunk.map(() => '(?,?)').join(',');
-          await conn.query(
+          const [result] = await conn.query<ResultSetHeader>(
             `INSERT IGNORE INTO codeforces_solved_problems (user_id, problem_key) VALUES ${ph}`,
             chunk.flatMap((k) => [user.userId, k]),
           );
+          actualDelta += result.affectedRows;
         }
       }
 
@@ -232,7 +189,11 @@ async function syncUser(user: SyncUser): Promise<{ result: SyncResult; cfCalls: 
         [newMaxSubmissionId, actualDelta, user.userId],
       );
 
+      await conn.commit();
       newSolved = actualDelta;
+    } catch (err) {
+      await conn.rollback();
+      throw err;
     } finally {
       conn.release();
     }

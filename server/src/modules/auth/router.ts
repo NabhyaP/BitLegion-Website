@@ -3,21 +3,26 @@ import * as client from 'openid-client';
 import { env } from '../../config/env.ts';
 import { destroySession, regenerate } from '../../middleware/session.ts';
 import * as cfRepo from '../codeforces-links/repository.ts';
+import { safeReturnTo } from './return-to.ts';
 import { SignInError, signInWithGoogleClaims } from './service.ts';
 
 const GOOGLE_ISSUER = 'https://accounts.google.com';
 const CALLBACK_PATH = '/api/v1/auth/google/callback';
 
 let configCache: Promise<client.Configuration> | null = null;
+const googleOAuthConfigured = () => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+
 function googleConfig(): Promise<client.Configuration> {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+  const clientId = env.GOOGLE_CLIENT_ID;
+  const clientSecret = env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
     return Promise.reject(new Error('Google OAuth is not configured'));
   }
   // Discovery is cached for the process — it is a static document.
   configCache ??= client.discovery(
     new URL(GOOGLE_ISSUER),
-    env.GOOGLE_CLIENT_ID,
-    env.GOOGLE_CLIENT_SECRET,
+    clientId,
+    clientSecret,
   );
   return configCache;
 }
@@ -27,6 +32,10 @@ const redirectUri = () => new URL(CALLBACK_PATH, env.APP_URL).toString();
 export const authRouter = Router();
 
 authRouter.get('/google/start', async (req, res, next) => {
+  if (!googleOAuthConfigured()) {
+    return res.redirect('/login?error=oauth-not-configured');
+  }
+
   try {
     const config = await googleConfig();
     const verifier = client.randomPKCECodeVerifier();
@@ -36,7 +45,7 @@ authRouter.get('/google/start', async (req, res, next) => {
       state,
       nonce,
       verifier,
-      returnTo: typeof req.query.returnTo === 'string' ? req.query.returnTo : undefined,
+      returnTo: safeReturnTo(req.query.returnTo) ?? undefined,
     };
     const url = client.buildAuthorizationUrl(config, {
       redirect_uri: redirectUri(),
@@ -92,11 +101,14 @@ authRouter.get('/google/callback', async (req, res) => {
     req.session.userId = user.id;
     req.session.authAt = Date.now();
 
-    const returnTo = pending.returnTo?.startsWith('/') ? pending.returnTo : null;
+    const returnTo = safeReturnTo(pending.returnTo);
     // 9. No CF link → /onboarding; otherwise /dashboard. New/unconfirmed also → /onboarding.
     const cfAccount = await cfRepo.findAccountByUserId(user.id);
     const hasCfLink = cfAccount !== null && cfAccount.status !== 'UNLINKED';
-    res.redirect(returnTo ?? (isNew || !user.profileConfirmed || !hasCfLink ? '/onboarding' : '/dashboard'));
+    const destination = isNew || !user.profileConfirmed || !hasCfLink
+      ? '/onboarding'
+      : (returnTo ?? '/dashboard');
+    res.redirect(destination);
   } catch (err) {
     if (err instanceof SignInError) return fail(err.reason);
     return fail('oauth-failure');

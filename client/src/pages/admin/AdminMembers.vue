@@ -5,13 +5,15 @@
  * CSV import with per-row error report, role management, CF link clear.
  * All mutations are server-audited. §0.3: no logic in template.
  */
-import { ref, reactive, watch } from 'vue';
+import { ref, reactive, watch, computed } from 'vue';
 import {
   fetchAdminMembers, updateAdminMember, createAdminMember,
   clearAdminCfLink, patchAdminRoles, importMembersCSV,
+  fetchCourseCodes,
   type AdminMemberResponse, type AdminMembersParams, type CsvImportResult,
 } from '@/api/index.ts';
 import { ApiError } from '@/api/index.ts';
+import Papa from 'papaparse';
 
 // ── State ──────────────────────────────────────────────────────────────────
 const members = ref<AdminMemberResponse[]>([]);
@@ -25,7 +27,11 @@ const filters = reactive<Omit<AdminMembersParams, 'page' | 'pageSize'> & { page:
 let _debounce: ReturnType<typeof setTimeout> | null = null;
 
 const STATUSES = ['ACTIVE', 'PENDING', 'SUSPENDED', 'ALUMNI'];
-const BRANCHES = ['CSE', 'ECE'];
+const configuredBranches = ref<string[]>([]);
+const BRANCHES = computed(() => [...new Set([
+  ...configuredBranches.value,
+  ...members.value.flatMap((member) => member.branch ? [member.branch] : []),
+])].sort());
 const currentYear = new Date().getFullYear();
 const batchYears = Array.from({ length: currentYear - 2019 + 2 }, (_, i) => 2019 + i);
 
@@ -59,22 +65,28 @@ watch(() => filters.q, () => {
 });
 
 load();
+void fetchCourseCodes()
+  .then((codes) => { configuredBranches.value = codes.map((course) => course.branch); })
+  .catch(() => { configuredBranches.value = []; });
 
 // ── Edit modal ─────────────────────────────────────────────────────────────
 const editing = ref<AdminMemberResponse | null>(null);
-const editForm = reactive({ displayName: '', rollNo: '', batchYear: '', branch: '', status: '', showInLeaderboard: true });
+const editForm = reactive({ displayName: '', avatarUrl: '', rollNo: '', batchYear: '', branch: '', status: '', showInLeaderboard: true });
 const editSaving = ref(false);
 const editError = ref<string | null>(null);
+const avatarBroken = ref(false);
 
 function openEdit(m: AdminMemberResponse) {
   editing.value = m;
   editForm.displayName = m.displayName;
+  editForm.avatarUrl = m.avatarUrl ?? '';
   editForm.rollNo = m.rollNo ?? '';
   editForm.batchYear = m.batchYear ? String(m.batchYear) : '';
   editForm.branch = m.branch ?? '';
   editForm.status = m.status;
   editForm.showInLeaderboard = m.showInLeaderboard;
   editError.value = null;
+  avatarBroken.value = false;
 }
 
 async function saveEdit() {
@@ -83,6 +95,7 @@ async function saveEdit() {
   try {
     await updateAdminMember(editing.value.id, {
       displayName: editForm.displayName || undefined,
+      avatarUrl: editForm.avatarUrl.trim() || null,
       rollNo: editForm.rollNo || null,
       batchYear: editForm.batchYear ? Number(editForm.batchYear) : null,
       branch: editForm.branch || null,
@@ -171,15 +184,17 @@ const csvSaving = ref(false);
 const csvError = ref<string | null>(null);
 
 function parseCsv(raw: string): unknown[] {
-  const lines = raw.trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = (lines[0] as string).split(',').map((h) => h.trim().toLowerCase());
-  return lines.slice(1).map((line) => {
-    const vals = line.split(',').map((v) => v.trim());
-    const obj: Record<string, string> = {};
-    headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
-    return obj;
+  const result = Papa.parse<Record<string, string>>(raw, {
+    header: true,
+    skipEmptyLines: 'greedy',
+    transformHeader: (header) => header.trim().toLowerCase(),
+    transform: (value) => value.trim(),
   });
+  if (result.errors.length > 0) {
+    const first = result.errors[0]!;
+    throw new Error(`CSV row ${(first.row ?? 0) + 2}: ${first.message}`);
+  }
+  return result.data;
 }
 
 async function doImport() {
@@ -192,7 +207,7 @@ async function doImport() {
     csvResult.value = res.data;
     load();
   } catch (e) {
-    csvError.value = e instanceof ApiError ? e.message : 'Import failed.';
+    csvError.value = e instanceof Error ? e.message : 'Import failed.';
   } finally {
     csvSaving.value = false;
   }
@@ -270,7 +285,14 @@ function fmtDate(iso: string) {
         </thead>
         <tbody>
           <tr v-for="m in members" :key="m.id" style="border-bottom:1px solid var(--surface)">
-            <td style="padding:0.5rem;font-weight:500">{{ m.displayName }}</td>
+            <td style="padding:0.5rem;font-weight:500">
+              <span style="display:flex;align-items:center;gap:0.5rem">
+                <img v-if="m.avatarUrl" :src="m.avatarUrl" :alt="`${m.displayName} avatar`"
+                     width="28" height="28" loading="lazy"
+                     style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0" />
+                <span>{{ m.displayName }}</span>
+              </span>
+            </td>
             <td style="padding:0.5rem;color:var(--muted);font-size:0.75rem">{{ m.collegeEmail }}</td>
             <td style="padding:0.5rem;color:var(--muted)">{{ m.batchYear ?? '—' }}</td>
             <td style="padding:0.5rem;color:var(--muted)">{{ m.branch ?? '—' }}</td>
@@ -330,6 +352,19 @@ function fmtDate(iso: string) {
             <input v-model="editForm.displayName" maxlength="100" required
                    style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />
           </label>
+          <label style="font-size:0.85rem">Profile picture URL
+            <input v-model="editForm.avatarUrl" type="url" maxlength="500" placeholder="https://..."
+                   style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box"
+                   @input="avatarBroken=false" />
+          </label>
+          <div v-if="editForm.avatarUrl" style="display:flex;align-items:center;gap:0.65rem;font-size:0.75rem;color:var(--muted)">
+            <img :src="editForm.avatarUrl" alt="Profile picture preview" width="48" height="48"
+                 style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:1px solid var(--line)"
+                 @error="avatarBroken=true" @load="avatarBroken=false" />
+            <span :style="avatarBroken ? 'color:var(--danger)' : ''">
+              {{ avatarBroken ? 'Image could not be loaded.' : 'Preview' }}
+            </span>
+          </div>
           <label style="font-size:0.85rem">Roll no
             <input v-model="editForm.rollNo" maxlength="20"
                    style="display:block;width:100%;padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;margin-top:0.2rem;box-sizing:border-box" />

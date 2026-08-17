@@ -1,21 +1,10 @@
-/**
- * Serialized CF request queue (§C2).
- *
- * Rules:
- *  - ≥2,200 ms between call STARTS (CF rate-limit courtesy)
- *  - Exponential back-off + jitter after rate-limit errors
- *  - Bounded retry attempts (3 max for transient errors)
- *  - Cross-tab coordination via navigator.locks (fallback: BroadcastChannel leader election)
- *  - One tab refreshes a given handle at a time
- *  - Refresh button disabled while a refresh is active (via exported reactive state)
- *
- * No Vue imports — importable from workers and coordinators.
- */
-
 const CF_MIN_INTERVAL_MS = 2_200;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 5_000;
 const LOCK_NAME = 'bitlegion-cf-queue';
+const LEASE_KEY = 'bitlegion.cf.leader';
+const LEASE_MS = 15_000;
+const TAB_ID = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
 export class CfRateLimitError extends Error {
   readonly retryAfterMs: number;
@@ -31,33 +20,17 @@ export class CfUnavailableError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Module-level serialization (one tab)
-// ---------------------------------------------------------------------------
-
 let _lastCallStart = 0;
 let _chain: Promise<void> = Promise.resolve();
 let _rateLimitedUntil = 0;
 
-/**
- * Enqueue a CF API call. Enforces MIN_INTERVAL between call starts.
- * Returns the result or throws CfRateLimitError / CfUnavailableError.
- */
 export function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   const result = _chain.then(async (): Promise<T> => {
-    // Honour rate-limit back-off
     const now = Date.now();
-    if (_rateLimitedUntil > now) {
-      const wait = _rateLimitedUntil - now;
-      await sleep(wait);
-    }
+    if (_rateLimitedUntil > now) throw new CfRateLimitError(_rateLimitedUntil - now);
 
-    // Enforce minimum interval between call starts
     const gap = Date.now() - _lastCallStart;
-    if (gap < CF_MIN_INTERVAL_MS) {
-      await sleep(CF_MIN_INTERVAL_MS - gap);
-    }
-
+    if (gap < CF_MIN_INTERVAL_MS) await sleep(CF_MIN_INTERVAL_MS - gap);
     _lastCallStart = Date.now();
 
     let attempt = 0;
@@ -67,12 +40,11 @@ export function enqueue<T>(fn: () => Promise<T>): Promise<T> {
       } catch (err) {
         if (err instanceof CfRateLimitError) {
           _rateLimitedUntil = Date.now() + err.retryAfterMs;
-          throw err; // never retry rate-limit
+          throw err;
         }
         if (err instanceof CfUnavailableError && attempt < MAX_RETRIES) {
           attempt++;
-          const backoff = BACKOFF_BASE_MS * 2 ** (attempt - 1) + jitter();
-          await sleep(backoff);
+          await sleep(BACKOFF_BASE_MS * 2 ** (attempt - 1) + jitter());
           continue;
         }
         throw err;
@@ -80,95 +52,155 @@ export function enqueue<T>(fn: () => Promise<T>): Promise<T> {
     }
   });
 
-  // Attach a no-op catch so the chain doesn't break on individual failures
   _chain = result.then(() => undefined, () => undefined);
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Cross-tab coordination — navigator.locks with BroadcastChannel fallback
-// ---------------------------------------------------------------------------
-
 export type TabRole = 'leader' | 'follower';
 let _tabRole: TabRole = 'follower';
 let _lockController: AbortController | null = null;
+let _leaseTimer: ReturnType<typeof setInterval> | null = null;
+let _observedLeaderUntil = 0;
 
-/**
- * Try to acquire the cross-tab CF queue lock.
- * Only the leader tab should call CF APIs for a given handle.
- * The lock is held until releaseLeader() is called or the tab closes.
- */
-export async function tryBecomeLeader(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.locks) {
-    // No Web Locks API — always act as leader (single-tab fallback)
+const channel = typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel(LOCK_NAME)
+  : null;
+
+channel?.addEventListener('message', (event: MessageEvent) => {
+  const message = event.data as { type?: string; tabId?: string; expiresAt?: number };
+  if (message.tabId === TAB_ID) return;
+  if (message.type === 'probe' && _tabRole === 'leader') {
+    channel.postMessage({ type: 'leader', tabId: TAB_ID, expiresAt: Date.now() + LEASE_MS });
+  }
+  if (message.type === 'leader' && typeof message.expiresAt === 'number') {
+    _observedLeaderUntil = Math.max(_observedLeaderUntil, message.expiresAt);
+  }
+});
+
+function readLease(): { tabId: string; expiresAt: number } | null {
+  try {
+    const raw = localStorage.getItem(LEASE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as { tabId?: unknown; expiresAt?: unknown };
+    return typeof value.tabId === 'string' && typeof value.expiresAt === 'number'
+      ? { tabId: value.tabId, expiresAt: value.expiresAt }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLease(): boolean {
+  try {
+    const lease = { tabId: TAB_ID, expiresAt: Date.now() + LEASE_MS };
+    localStorage.setItem(LEASE_KEY, JSON.stringify(lease));
+    channel?.postMessage({ type: 'leader', ...lease });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryFallbackLeadership(): Promise<boolean> {
+  channel?.postMessage({ type: 'probe', tabId: TAB_ID });
+  await sleep(80);
+  const current = readLease();
+  const now = Date.now();
+  if (_observedLeaderUntil > now || (current && current.tabId !== TAB_ID && current.expiresAt > now)) {
+    return false;
+  }
+
+  if (!writeLease()) {
+    // Storage can be disabled; BroadcastChannel still prevents established leaders.
     _tabRole = 'leader';
     return true;
   }
 
-  if (_tabRole === 'leader') return true;
+  // Give simultaneous contenders a chance to overwrite the lease, then verify ownership.
+  await sleep(50);
+  if (readLease()?.tabId !== TAB_ID) return false;
+  _tabRole = 'leader';
+  _leaseTimer = setInterval(() => {
+    if (_tabRole === 'leader') writeLease();
+  }, LEASE_MS / 3);
+  return true;
+}
 
-  // First try: grab immediately with ifAvailable (non-blocking)
-  const gotIt = await new Promise<boolean>((resolve) => {
-    _lockController = new AbortController();
+export async function tryBecomeLeader(): Promise<boolean> {
+  if (_tabRole === 'leader') return true;
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    return tryFallbackLeadership();
+  }
+
+  const immediateController = new AbortController();
+  _lockController = immediateController;
+  const gotImmediately = await new Promise<boolean>((resolve) => {
     navigator.locks.request(
       LOCK_NAME,
-      { ifAvailable: true, signal: _lockController.signal },
+      { ifAvailable: true, signal: immediateController.signal },
       (lock) => {
-        if (lock) {
-          _tabRole = 'leader';
-          resolve(true);
-          return new Promise<void>((res) => {
-            _lockController!.signal.addEventListener('abort', () => res());
-          });
-        } else {
+        if (!lock) {
           resolve(false);
           return Promise.resolve();
         }
+        _tabRole = 'leader';
+        resolve(true);
+        return new Promise<void>((release) => {
+          immediateController.signal.addEventListener('abort', () => release(), { once: true });
+        });
       },
     ).catch(() => resolve(false));
   });
+  if (gotImmediately) return true;
 
-  if (gotIt) return true;
-
-  // Second try: wait up to 4 seconds for the lock to become free.
-  // This handles stale locks from crashed/closed tabs — browsers release
-  // Web Locks automatically when the tab that held them closes, but the
-  // Promise above won't see that. A brief wait covers the release window.
+  const controller = new AbortController();
+  _lockController = controller;
   return new Promise<boolean>((resolve) => {
-    let done = false;
+    let settled = false;
     const timeout = setTimeout(() => {
-      if (!done) { done = true; resolve(false); }
+      if (settled) return;
+      settled = true;
+      controller.abort();
+      resolve(false);
     }, 4_000);
-
-    const ac = new AbortController();
-    _lockController = ac;
 
     navigator.locks.request(
       LOCK_NAME,
-      { signal: ac.signal },  // blocking request — waits for lock
-      (lock) => {
-        if (!done) {
-          done = true;
-          clearTimeout(timeout);
-          _tabRole = 'leader';
-          resolve(true);
-        }
-        return new Promise<void>((res) => {
-          ac.signal.addEventListener('abort', () => res());
+      { signal: controller.signal },
+      () => {
+        if (settled) return Promise.resolve();
+        settled = true;
+        clearTimeout(timeout);
+        _tabRole = 'leader';
+        resolve(true);
+        return new Promise<void>((release) => {
+          controller.signal.addEventListener('abort', () => release(), { once: true });
         });
       },
     ).catch(() => {
-      if (!done) { done = true; clearTimeout(timeout); resolve(false); }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(false);
     });
   });
 }
 
 export function releaseLeader(): void {
-  if (_lockController) {
-    _lockController.abort();
-    _lockController = null;
+  _lockController?.abort();
+  _lockController = null;
+  if (_leaseTimer) clearInterval(_leaseTimer);
+  _leaseTimer = null;
+  try {
+    if (readLease()?.tabId === TAB_ID) localStorage.removeItem(LEASE_KEY);
+  } catch {
+    // Storage is optional.
   }
   _tabRole = 'follower';
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', releaseLeader);
 }
 
 export function getTabRole(): TabRole {
@@ -183,14 +215,9 @@ export function getRateLimitedUntil(): number {
   return _rateLimitedUntil;
 }
 
-/** Set from outside when a rate-limit is encountered (so other code paths can check). */
 export function setRateLimited(untilMs: number): void {
   _rateLimitedUntil = Math.max(_rateLimitedUntil, untilMs);
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

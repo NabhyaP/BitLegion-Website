@@ -130,6 +130,7 @@ const memberTab = ref<'account' | 'manual'>('account');
 
 // Linked account (account tab)
 const linkedUser = ref<UserResult | null>(null);
+const linkedUserId = ref<number | null>(null);
 
 // Form fields (manual tab, or overridable after picking account)
 const memberForm = reactive({
@@ -149,6 +150,7 @@ function openAddMember(t: TeamResponse) {
   memberModal.value = { mode: 'add', teamId: t.id, teamName: t.name };
   memberTab.value = 'account';
   linkedUser.value = null;
+  linkedUserId.value = null;
   clearUserSearch();
   memberForm.name = memberForm.roleTitle = memberForm.cfHandle = memberForm.photoUrl = '';
   memberForm.displayOrder = '0';
@@ -162,6 +164,7 @@ function openEditMember(team: TeamResponse, m: TeamMemberResponse) {
   // otherwise default to manual.
   memberTab.value = m.userId ? 'account' : 'manual';
   linkedUser.value = null;
+  linkedUserId.value = m.userId;
   clearUserSearch();
   memberForm.name = m.name;
   memberForm.roleTitle = m.roleTitle;
@@ -179,6 +182,7 @@ function openEditMember(team: TeamResponse, m: TeamMemberResponse) {
  */
 function selectUser(u: UserResult) {
   linkedUser.value = u;
+  linkedUserId.value = u.id;
   memberForm.name = u.displayName;
   memberForm.cfHandle = u.cfHandle ?? '';
   clearUserSearch();
@@ -186,6 +190,7 @@ function selectUser(u: UserResult) {
 
 function clearLinkedUser() {
   linkedUser.value = null;
+  linkedUserId.value = null;
   memberForm.name = '';
   memberForm.cfHandle = '';
   // photoUrl is left alone — it is admin-entered, not derived from the linked account.
@@ -207,7 +212,7 @@ async function doSaveMember() {
     cfHandle: memberForm.cfHandle.trim() || null,
     photoUrl: memberForm.photoUrl.trim() || null,
     displayOrder: Number(memberForm.displayOrder),
-    userId: memberTab.value === 'account' && linkedUser.value ? linkedUser.value.id : null,
+    userId: memberTab.value === 'account' ? linkedUserId.value : null,
   };
 
   try {
@@ -415,14 +420,14 @@ async function doDeleteMember(teamId: number, m: TeamMemberResponse) {
           <!-- ── Account tab ─────────────────────────────────────────── -->
           <template v-if="memberTab === 'account'">
             <!-- Already picked a user -->
-            <div v-if="linkedUser"
+            <div v-if="linkedUser || linkedUserId"
                  style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem;background:var(--ok-bg);border:1px solid var(--ok-bg);border-radius:6px">
-              <img v-if="linkedUser.avatarUrl" :src="linkedUser.avatarUrl" :alt="linkedUser.displayName"
+              <img v-if="linkedUser?.avatarUrl" :src="linkedUser.avatarUrl" :alt="linkedUser.displayName"
                    width="36" height="36" style="border-radius:50%;object-fit:cover;flex-shrink:0" />
               <div style="flex:1;min-width:0">
-                <div style="font-weight:600;font-size:0.875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser.displayName }}</div>
-                <div style="font-size:0.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser.collegeEmail }}</div>
-                <div v-if="linkedUser.cfHandle" style="font-size:0.75rem;color:var(--accent)">CF: {{ linkedUser.cfHandle }}</div>
+                <div style="font-weight:600;font-size:0.875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser?.displayName ?? memberForm.name }}</div>
+                <div style="font-size:0.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ linkedUser?.collegeEmail ?? `Linked account #${linkedUserId}` }}</div>
+                <div v-if="linkedUser?.cfHandle || memberForm.cfHandle" style="font-size:0.75rem;color:var(--accent)">CF: {{ linkedUser?.cfHandle ?? memberForm.cfHandle }}</div>
               </div>
               <button type="button"
                       style="font-size:0.75rem;color:var(--danger);cursor:pointer;background:none;border:none;padding:0.2rem"

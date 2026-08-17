@@ -69,6 +69,7 @@ export function getHandleRefs(handle: string) {
 // ---------------------------------------------------------------------------
 
 let _worker: Worker | null = null;
+let _workerRequestId = 0;
 
 function getWorker(): Worker {
   if (!_worker) {
@@ -84,13 +85,15 @@ function getWorker(): Worker {
 function computeInWorker(subs: CfSubmission[]): Promise<AnalyticsResult> {
   return new Promise((resolve, reject) => {
     const w = getWorker();
+    const requestId = ++_workerRequestId;
     const handler = (e: MessageEvent) => {
+      if (e.data.requestId !== requestId) return;
       w.removeEventListener('message', handler);
       if (e.data.type === 'result') resolve(e.data.result);
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', handler);
-    w.postMessage({ type: 'compute', submissions: subs });
+    w.postMessage({ type: 'compute', requestId, submissions: subs });
   });
 }
 
@@ -111,7 +114,7 @@ const _refreshing = new Set<string>();
  * Refresh data for a handle. Safe to call concurrently — deduplicated per handle.
  * Returns immediately if another refresh for the same handle is in progress.
  */
-export async function refresh(rawHandle: string): Promise<void> {
+export async function refresh(rawHandle: string, options: { force?: boolean } = {}): Promise<void> {
   const handle = rawHandle.toLowerCase();
   if (_refreshing.has(handle)) return;
 
@@ -134,58 +137,66 @@ export async function refresh(rawHandle: string): Promise<void> {
   const hadCache = !!cachedProfile;
   refs.stale.value = hadCache && !cache.isFresh(meta?.profileFetchedAt ?? null);
   refs.lastSuccessAt.value = meta?.profileFetchedAt ?? null;
+  const profileFresh = !options.force && cache.isFresh(meta?.profileFetchedAt ?? null);
+  const ratingsFresh = !options.force && cache.isFresh(meta?.ratingsFetchedAt ?? null);
+  const submissionsFresh = !options.force && cache.isFresh(meta?.submissionsFetchedAt ?? null);
 
   // If cached data is fresh, compute analytics and return without hitting the network.
-  if (cache.isFresh(meta?.profileFetchedAt ?? null) && cache.isFresh(meta?.ratingsFetchedAt ?? null)) {
+  if (profileFresh && ratingsFresh && submissionsFresh) {
     if (cachedSubs.length > 0) {
       refs.analytics.value = await runAnalytics(cachedSubs);
     }
     refs.status.value = 'success';
-    if (cachedSubs.length > 0) return;
+    return;
     // Still need submissions — fall through to network fetch
   }
 
   // Try cross-tab leader lock. tryBecomeLeader() has a built-in 4-second
   // blocking fallback so stale locks from dead tabs don't block forever.
-  const isLeader = await tryBecomeLeader();
+  if (_refreshing.has(handle)) return;
+  _refreshing.add(handle);
+  let isLeader: boolean;
+  try {
+    isLeader = await tryBecomeLeader();
+  } catch (error) {
+    _refreshing.delete(handle);
+    throw error;
+  }
 
   if (!isLeader) {
     // Another tab is refreshing — show cached data with revalidating indicator
     refs.status.value = hadCache ? 'revalidating' : 'loading';
     // Retry once after a delay in case the other tab finishes
     setTimeout(() => {
-      if (refs.status.value === 'revalidating') refresh(rawHandle);
+      if (refs.status.value === 'revalidating') refresh(rawHandle, options);
     }, 5_000);
+    _refreshing.delete(handle);
     return;
   }
 
-  _refreshing.add(handle);
-
   try {
     // Cache was already loaded above (before the lock). Use those values.
-    const profileFresh = cache.isFresh(meta?.profileFetchedAt ?? null);
-    const profileStaleWindow = cache.isWithinStaleWindow(meta?.profileFetchedAt ?? null);
     refs.status.value = hadCache ? (profileFresh ? 'success' : 'revalidating') : 'loading';
 
     // Skip network if everything is fresh and we have submissions
-    if (profileFresh && cache.isFresh(meta?.ratingsFetchedAt ?? null) && cachedSubs.length > 0) {
+    if (profileFresh && ratingsFresh && submissionsFresh) {
       refs.analytics.value = await runAnalytics(cachedSubs);
       refs.status.value = 'success';
       return;
     }
 
     // Fetch profile + ratings in parallel, submissions separately (incremental)
-    let profileOk = profileStaleWindow;
-    let ratingsOk = cache.isWithinStaleWindow(meta?.ratingsFetchedAt ?? null);
+    let profileOk = profileFresh;
+    let ratingsOk = ratingsFresh;
 
     const [profileResult, ratingsResult] = await Promise.allSettled([
       profileFresh ? Promise.resolve(cachedProfile!) : cfClient.fetchProfile(handle),
-      cache.isFresh(meta?.ratingsFetchedAt ?? null) ? Promise.resolve(cachedRatings ?? []) : cfClient.fetchRatingHistory(handle),
+      ratingsFresh ? Promise.resolve(cachedRatings ?? []) : cfClient.fetchRatingHistory(handle),
     ]);
 
     if (profileResult.status === 'fulfilled') {
       refs.profile.value = profileResult.value;
-      await cache.setProfile(handle, profileResult.value);
+      if (!profileFresh) await cache.setProfile(handle, profileResult.value);
       profileOk = true;
     } else {
       handleFetchError(profileResult.reason, refs);
@@ -193,14 +204,16 @@ export async function refresh(rawHandle: string): Promise<void> {
 
     if (ratingsResult.status === 'fulfilled') {
       refs.ratings.value = ratingsResult.value;
-      await cache.setRatings(handle, ratingsResult.value);
+      if (!ratingsFresh) await cache.setRatings(handle, ratingsResult.value);
       ratingsOk = true;
     } else {
       handleFetchError(ratingsResult.reason, refs);
     }
 
     // Incremental submissions fetch
-    const subsOk = await fetchSubmissionsIncremental(handle, meta?.lastSubmissionId ?? 0, refs);
+    const subsOk = submissionsFresh
+      ? true
+      : await fetchSubmissionsIncremental(handle, meta?.lastSubmissionId ?? 0, refs);
 
     // Compute analytics from whatever we have
     const allSubs = await cache.getSubmissions(handle);
@@ -210,12 +223,16 @@ export async function refresh(rawHandle: string): Promise<void> {
     }
 
     // Set final status
-    if (profileOk || ratingsOk || subsOk) {
+    const failureStatus = currentFetchStatus(refs);
+    if (profileOk && ratingsOk && subsOk) {
       refs.status.value = 'success';
       refs.lastSuccessAt.value = Date.now();
       refs.stale.value = false;
       refs.errorMessage.value = null;
-    } else if (!hadCache) {
+    } else if (refs.profile.value) {
+      if (failureStatus !== 'rate-limited') refs.status.value = 'partial';
+      refs.stale.value = true;
+    } else if (!hadCache && failureStatus !== 'rate-limited' && failureStatus !== 'cf-unavailable') {
       refs.status.value = 'error';
     }
   } catch (err) {
@@ -224,6 +241,10 @@ export async function refresh(rawHandle: string): Promise<void> {
     _refreshing.delete(handle);
     releaseLeader();
   }
+}
+
+function currentFetchStatus(refs: ReturnType<typeof createHandleRefs>): FetchStatus {
+  return refs.status.value;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,27 +258,28 @@ async function fetchSubmissionsIncremental(
 ): Promise<boolean> {
   let from = 1;
   let pagesFetched = 0;
-  let anyNewData = false;
+  let requestSucceeded = false;
 
   while (pagesFetched < INCREMENTAL_MAX_PAGES) {
     let page: CfSubmission[];
     try {
       page = await cfClient.fetchSubmissionsPage(handle, from, PAGE_SIZE);
+      requestSucceeded = true;
     } catch (err) {
       handleFetchError(err, refs);
-      break;
+      return false;
     }
 
-    if (page.length === 0) break; // no more submissions
+    if (page.length === 0) {
+      await cache.upsertSubmissions(handle, []);
+      break;
+    }
 
     // Stop condition: a submission on this page has id ≤ lastId — we've reached overlap
     const overlap = page.some((s) => s.submissionId <= lastId);
     const newSubs = lastId === 0 ? page : page.filter((s) => s.submissionId > lastId);
 
-    if (newSubs.length > 0) {
-      await cache.upsertSubmissions(handle, newSubs);
-      anyNewData = true;
-    }
+    await cache.upsertSubmissions(handle, newSubs);
 
     if (overlap || page.length < PAGE_SIZE) break; // last page or caught up
 
@@ -265,7 +287,7 @@ async function fetchSubmissionsIncremental(
     pagesFetched++;
   }
 
-  return anyNewData;
+  return requestSucceeded;
 }
 
 // ---------------------------------------------------------------------------

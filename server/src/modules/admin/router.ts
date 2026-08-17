@@ -20,9 +20,9 @@
  * role mutations. Every mutation writes an audit row in the same transaction.
  */
 import { Router } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { requireAuth, requireRole, requireRecentAuth } from '../../middleware/auth.ts';
 import * as service from './service.ts';
-import { pool } from '../../db/pool.ts';
 import {
   listMembersQuerySchema,
   updateMemberSchema,
@@ -34,8 +34,41 @@ import {
 import { badRequest, notFound } from '../../shared/errors.ts';
 import * as usersRepo from '../users/repository.ts';
 import { z } from 'zod';
+import { hasValidJobTriggerSecret } from '../../shared/job-trigger.ts';
+import { spawnJob } from '../../shared/job-runner.ts';
+import * as audit from '../audit/repository.ts';
 
 export const adminRouter = Router();
+
+const requireAdminOrJobSecret: RequestHandler = (req, res, next) => {
+  if (hasValidJobTriggerSecret(req)) return next();
+  return requireAuth(req, res, (authError?: unknown) => {
+    if (authError) return next(authError);
+    return requireRole('ADMIN')(req, res, next);
+  });
+};
+
+async function triggerLeaderboardRefresh(req: Request, res: Response, next: NextFunction) {
+  try {
+    await spawnJob('refresh-codeforces-leaderboard');
+    await audit.record({
+      actorUserId: req.user?.id ?? null,
+      action: 'jobs.lb-refresh.retry',
+      requestId: req.requestId ?? '',
+      after: { trigger: req.user ? 'admin' : 'job-secret' },
+    });
+    res.status(202).json({ data: { message: 'Leaderboard refresh triggered.' } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// This route supports either an authenticated admin or the dedicated cron secret.
+adminRouter.post(
+  '/jobs/leaderboard/retry',
+  requireAdminOrJobSecret,
+  triggerLeaderboardRefresh,
+);
 
 // All admin routes require auth + ADMIN role
 adminRouter.use(requireAuth, requireRole('ADMIN'));
@@ -94,11 +127,29 @@ adminRouter.post('/members/import', async (req, res, next) => {
   try {
     // Body: { rows: [{display_name,college_email,batch_year,branch},...] }
     const bodySchema = z.object({
-      rows: z.array(csvRowSchema).min(1).max(2000),
+      rows: z.array(z.unknown()).min(1).max(2000),
     });
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) throw badRequest('Invalid CSV data.', flattenZod(parsed.error));
-    const result = await service.importMembersFromCsv(parsed.data.rows, req.user!.id, req.requestId ?? '');
+    const validRows: service.ValidatedCsvRow[] = [];
+    const validationErrors: service.CsvImportResult['errors'] = [];
+    parsed.data.rows.forEach((row, index) => {
+      const validated = csvRowSchema.safeParse(row);
+      if (validated.success) {
+        validRows.push({ row: index + 2, data: validated.data });
+      } else {
+        const email = typeof row === 'object' && row !== null && 'college_email' in row
+          ? String((row as { college_email?: unknown }).college_email ?? '')
+          : '';
+        validationErrors.push({
+          row: index + 2,
+          email,
+          reason: validated.error.issues.map((issue) => issue.message).join(' '),
+        });
+      }
+    });
+    const result = await service.importMembersFromCsv(validRows, req.user!.id, req.requestId ?? '');
+    result.errors.unshift(...validationErrors);
     res.json({ data: result });
   } catch (err) { next(err); }
 });
@@ -185,34 +236,6 @@ adminRouter.get('/jobs/leaderboard', async (req, res, next) => {
  * MySQL lock independently. Returns 202 immediately — never holds the HTTP
  * connection while the job runs (§B3.4).
  */
-adminRouter.post('/jobs/leaderboard/retry', async (req, res, next) => {
-  try {
-    const { spawn } = await import('node:child_process');
-    const { fileURLToPath } = await import('node:url');
-    const path = await import('node:path');
-    const jobPath = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../../../jobs/refresh-codeforces-leaderboard.js',
-    );
-    // Fire-and-forget; the job handles its own MySQL lock.
-    spawn(process.execPath, [jobPath], {
-      detached: true,
-      stdio: 'ignore',
-      env: process.env,
-    }).unref();
-
-    // Audit the manual trigger
-    const { record } = await import('../audit/repository.ts');
-    await record({
-      actorUserId: req.user!.id,
-      action: 'jobs.lb-refresh.retry',
-      requestId: req.requestId ?? '',
-    });
-
-    res.status(202).json({ data: { message: 'Leaderboard refresh triggered.' } });
-  } catch (err) { next(err); }
-});
-
 // ---------------------------------------------------------------------------
 // Jobs — solved sync
 // ---------------------------------------------------------------------------

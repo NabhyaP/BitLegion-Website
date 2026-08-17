@@ -25,8 +25,8 @@ import { withLock } from '../shared/lock.ts';
 import * as cf from '../shared/cf-client.ts';
 import * as lbRepo from '../modules/leaderboards/repository.ts';
 import type { LeaderboardEntry } from '../modules/leaderboards/repository.ts';
-import type { RowDataPacket } from 'mysql2/promise';
-import { CfHandleError, CfRateLimitError, CfUnavailableError } from '../shared/cf-client.ts';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { CfHandleError, CfRateLimitError } from '../shared/cf-client.ts';
 
 const LOCK_NAME = 'bitlegion:cf-leaderboard';
 
@@ -77,7 +77,7 @@ async function markAccountStatus(
 }
 
 async function insertJobRun(status: 'RUNNING' | 'OK' | 'FAILED', detail: object | null, startedAt: Date): Promise<number> {
-  const [res] = await pool.query<any>(
+  const [res] = await pool.query<ResultSetHeader>(
     `INSERT INTO job_runs (job_code, status, started_at, finished_at, duration_ms, detail)
      VALUES ('lb-refresh', ?, ?, IF(? = 'RUNNING', NULL, NOW()),
              IF(? = 'RUNNING', NULL, TIMESTAMPDIFF(MICROSECOND, ?, NOW()) / 1000), ?)`,
@@ -113,7 +113,7 @@ async function updateJobRun(
 async function bisectBadHandles(
   batch: LinkedUser[],
   badHandles: Set<string>,
-): Promise<cf.CfUserInfo[]> {
+): Promise<Array<{ user: LinkedUser; info: cf.CfUserInfo }>> {
   if (batch.length === 1) {
     const user = batch[0]!;
     badHandles.add(user.normalizedHandle);
@@ -127,12 +127,12 @@ async function bisectBadHandles(
   const left = batch.slice(0, mid);
   const right = batch.slice(mid);
 
-  const results: cf.CfUserInfo[] = [];
+  const results: Array<{ user: LinkedUser; info: cf.CfUserInfo }> = [];
 
   for (const half of [left, right]) {
     try {
       const res = await cf.userInfo(half.map((u) => u.handle));
-      results.push(...res);
+      results.push(...res.map((info, index) => ({ user: half[index]!, info })));
     } catch (err) {
       if (err instanceof CfHandleError) {
         // Recurse into this half to isolate the bad handle(s).
@@ -166,6 +166,7 @@ async function run(): Promise<void> {
     let handlesStale = 0;
     let cfCalls = 0;
     let errorSummary: string | null = null;
+    let published = false;
 
     try {
       // Step 3: users to snapshot.
@@ -177,7 +178,7 @@ async function run(): Promise<void> {
       }
 
       // Step 4–6: batch CF calls.
-      const goodResults = new Map<string, cf.CfUserInfo>(); // normalizedHandle → info
+      const goodResults = new Map<number, cf.CfUserInfo>(); // requested user id -> response
       const badHandles = new Set<string>();                  // normalized handles that errored
 
       const batchSize = env.LEADERBOARD_BATCH_SIZE;
@@ -186,24 +187,38 @@ async function run(): Promise<void> {
         cfCalls++;
         try {
           const infos = await cf.userInfo(batch.map((u) => u.handle));
-          for (const info of infos) {
-            goodResults.set(info.handle.toLowerCase(), info);
+          for (let index = 0; index < infos.length; index++) {
+            goodResults.set(batch[index]!.userId, infos[index]!);
           }
           handlesUpdated += infos.length;
         } catch (err) {
           if (err instanceof CfHandleError) {
             // Step 5: bisect to isolate bad handles.
-            const infos = await bisectBadHandles(batch, badHandles);
-            for (const info of infos) {
-              goodResults.set(info.handle.toLowerCase(), info);
+            try {
+              const infos = await bisectBadHandles(batch, badHandles);
+              for (const { user, info } of infos) {
+                goodResults.set(user.userId, info);
+              }
+              handlesUpdated += infos.length;
+            } catch (bisectError) {
+              for (let j = i; j < users.length; j++) {
+                badHandles.add(users[j]!.normalizedHandle);
+              }
+              if (bisectError instanceof CfRateLimitError) {
+                errorSummary = 'Rate-limited while checking an invalid handle batch; entries carried forward.';
+              } else {
+                const message = bisectError instanceof Error ? bisectError.message : String(bisectError);
+                errorSummary = `Codeforces became unavailable while checking handles: ${message}`;
+              }
+              console.warn(`[lb-refresh] ${errorSummary}`);
+              break;
             }
-            handlesUpdated += infos.length;
           } else if (err instanceof CfRateLimitError) {
             // Rate-limited mid-run — stop cleanly; remaining users get stale carry-forward.
             console.warn('[lb-refresh] rate-limited, stopping batch loop early');
             errorSummary = 'Rate-limited mid-run; some entries carried forward.';
             // Mark remaining users as not fetched (handled by stale logic below).
-            for (let j = i + batchSize; j < users.length; j++) {
+            for (let j = i; j < users.length; j++) {
               badHandles.add(users[j]!.normalizedHandle);
             }
             break;
@@ -218,18 +233,18 @@ async function run(): Promise<void> {
 
       // Step 6: mismatch detection (CF returned a handle that doesn't match expected).
       for (const user of users) {
-        const returned = goodResults.get(user.normalizedHandle);
+        const returned = goodResults.get(user.userId);
         if (returned && returned.handle.toLowerCase() !== user.normalizedHandle) {
           // CF account renamed — mark it.
           await markAccountStatus(user.userId, 'RENAMED_OR_MISMATCHED');
-          goodResults.delete(user.normalizedHandle);
+          goodResults.delete(user.userId);
           badHandles.add(user.normalizedHandle);
         }
       }
 
       // Step 7: stale carry-forward from previous READY version.
       const prevVersionId = await lbRepo.getActiveVersionId();
-      let prevEntries: Map<number, LeaderboardEntry> = new Map();
+      const prevEntries: Map<number, LeaderboardEntry> = new Map();
       if (prevVersionId !== null) {
         const prev = await lbRepo.getEntriesForVersion(prevVersionId);
         for (const e of prev) prevEntries.set(e.userId, e);
@@ -242,7 +257,7 @@ async function run(): Promise<void> {
       const entries: LeaderboardEntry[] = [];
 
       for (const user of users) {
-        const info = goodResults.get(user.normalizedHandle);
+        const info = goodResults.get(user.userId);
         const solvedCount = solvedCounts.get(user.userId) ?? null;
 
         if (info) {
@@ -306,6 +321,7 @@ async function run(): Promise<void> {
         await lbRepo.bulkInsertEntries(entries, conn);
         await lbRepo.activateVersion(versionId, conn);
         await conn.commit();
+        published = true;
       } catch (err) {
         await conn.rollback();
         throw err;
@@ -313,21 +329,40 @@ async function run(): Promise<void> {
         conn.release();
       }
 
-      // Step 12: append daily ratings (best-effort, outside the main transaction).
+      // Step 12: append daily ratings outside the publish transaction. Failures here
+      // must never change the state of an already-active snapshot.
+      const postPublishErrors: string[] = [];
       for (const entry of entries) {
         if (!entry.stale) {
-          await lbRepo.upsertRatingDaily(entry.userId, entry.rating, entry.maxRating, entry.solvedCount);
+          try {
+            await lbRepo.upsertRatingDaily(entry.userId, entry.rating, entry.maxRating, entry.solvedCount);
+          } catch (err) {
+            postPublishErrors.push(
+              `rating history user ${entry.userId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
       }
 
       // Step 13: job_runs OK.
-      await updateJobRun(jobRunId, 'OK', {
-        handlesRequested,
-        handlesUpdated,
-        handlesStale,
-        cfCalls,
-        errorSummary,
-      }, startedAt);
+      try {
+        await updateJobRun(jobRunId, 'OK', {
+          handlesRequested,
+          handlesUpdated,
+          handlesStale,
+          cfCalls,
+          errorSummary,
+          postPublishErrors: postPublishErrors.slice(0, 20),
+        }, startedAt);
+      } catch (err) {
+        console.error(
+          `[lb-refresh] snapshot published but job log update failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (postPublishErrors.length > 0) {
+        console.warn(`[lb-refresh] snapshot published with ${postPublishErrors.length} rating-history warning(s)`);
+      }
 
       console.log(
         `[lb-refresh] done — version ${versionId}, ` +
@@ -336,8 +371,10 @@ async function run(): Promise<void> {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[lb-refresh] fatal error: ${msg}`);
-      await lbRepo.markVersionFailed(versionId, msg.slice(0, 999));
-      await updateJobRun(jobRunId, 'FAILED', { error: msg }, startedAt);
+      if (!published) {
+        await lbRepo.markVersionFailed(versionId, msg.slice(0, 999));
+        await updateJobRun(jobRunId, 'FAILED', { error: msg }, startedAt);
+      }
       throw err;
     }
   });

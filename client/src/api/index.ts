@@ -15,6 +15,9 @@ import type {
   TeamResponse,
   PublicProfileResponse,
   AdminSettingsResponse,
+  CourseCodeResponse,
+  PersonalComparisonResponse,
+  RatingTrendsResponse,
 } from '@contracts';
 
 // ---------------------------------------------------------------------------
@@ -29,9 +32,20 @@ async function getCsrfToken(): Promise<string> {
   // Deduplicate concurrent calls to the token endpoint
   if (!_csrfFetch) {
     _csrfFetch = fetch('/api/v1/auth/csrf-token', { credentials: 'same-origin' })
-      .then((r) => r.json())
-      .then((b) => { _csrfToken = b.csrfToken as string; _csrfFetch = null; return _csrfToken!; })
-      .catch(() => { _csrfFetch = null; return ''; });
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`CSRF token request failed (${response.status}).`);
+        const body = await response.json() as { csrfToken?: unknown };
+        if (typeof body.csrfToken !== 'string' || !body.csrfToken) {
+          throw new Error('CSRF token response was invalid.');
+        }
+        _csrfToken = body.csrfToken;
+        _csrfFetch = null;
+        return _csrfToken;
+      })
+      .catch((error) => {
+        _csrfFetch = null;
+        throw error;
+      });
   }
   return _csrfFetch;
 }
@@ -69,6 +83,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export async function apiFetch<T>(
   path: string,
   init: RequestInit = {},
+  retryCsrf = true,
 ): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers: Record<string, string> = {
@@ -95,7 +110,8 @@ export async function apiFetch<T>(
     const code = body?.error?.code ?? '';
     if (code === 'INVALID_CSRF_TOKEN' || code === 'EBADCSRFTOKEN') {
       _csrfToken = null;
-      throw new ApiError(403, code, 'Session expired. Please refresh the page.');
+      if (retryCsrf) return apiFetch<T>(path, init, false);
+      throw new ApiError(403, code, 'Session security token expired. Please try again.');
     }
     const err = body?.error ?? {};
     throw new ApiError(403, err.code ?? 'FORBIDDEN', err.message ?? res.statusText, err.fields);
@@ -201,7 +217,10 @@ export type LeaderboardParams = {
   cursor?: string;
 };
 
-export async function fetchLeaderboard(params: LeaderboardParams = {}): Promise<LeaderboardResponse> {
+export async function fetchLeaderboard(
+  params: LeaderboardParams = {},
+  signal?: AbortSignal,
+): Promise<LeaderboardResponse> {
   const qs = new URLSearchParams();
   if (params.sort) qs.set('sort', params.sort);
   if (params.scope) qs.set('scope', params.scope);
@@ -212,8 +231,53 @@ export async function fetchLeaderboard(params: LeaderboardParams = {}): Promise<
   if (params.cursor) qs.set('cursor', params.cursor);
   const body = await apiFetch<LeaderboardResponse>(
     `/api/v1/leaderboards/codeforces?${qs.toString()}`,
+    { signal },
   );
   return body;
+}
+
+export async function fetchRatingTrends(days = 365): Promise<RatingTrendsResponse> {
+  return apiFetch<RatingTrendsResponse>(`/api/v1/leaderboards/codeforces/trends?days=${days}`);
+}
+
+export async function fetchPersonalComparison(): Promise<PersonalComparisonResponse> {
+  return apiFetch<PersonalComparisonResponse>('/api/v1/leaderboards/codeforces/me-comparison');
+}
+
+// ---------------------------------------------------------------------------
+// Course codes
+// ---------------------------------------------------------------------------
+
+export async function fetchCourseCodes(): Promise<CourseCodeResponse[]> {
+  const body = await apiFetch<{ data: CourseCodeResponse[] }>('/api/v1/course-codes');
+  return body.data;
+}
+
+export async function createCourseCode(
+  value: CourseCodeResponse,
+): Promise<CourseCodeResponse> {
+  const body = await apiFetch<{ data: CourseCodeResponse }>('/api/v1/admin/course-codes', {
+    method: 'POST',
+    body: JSON.stringify(value),
+  });
+  return body.data;
+}
+
+export async function updateCourseCode(
+  code: string,
+  value: Pick<CourseCodeResponse, 'branch' | 'name'>,
+): Promise<CourseCodeResponse> {
+  const body = await apiFetch<{ data: CourseCodeResponse }>(
+    `/api/v1/admin/course-codes/${encodeURIComponent(code)}`,
+    { method: 'PATCH', body: JSON.stringify(value) },
+  );
+  return body.data;
+}
+
+export async function deleteCourseCode(code: string): Promise<void> {
+  await apiFetch<void>(`/api/v1/admin/course-codes/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ---------------------------------------------------------------------------

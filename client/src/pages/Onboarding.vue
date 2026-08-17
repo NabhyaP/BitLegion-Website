@@ -3,9 +3,9 @@
  * Onboarding — confirm parsed roll-no / batch / branch, then link Codeforces.
  * Uses the Pinia session store so PATCH /me gets the CSRF token automatically. (§0.3)
  */
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useSessionStore } from '@/stores/session.ts';
-import { ApiError } from '@/api/index.ts';
+import { ApiError, fetchCourseCodes } from '@/api/index.ts';
 
 const session = useSessionStore();
 
@@ -14,6 +14,15 @@ const batchYear = ref<number | null>(null);
 const branch = ref('');
 const error = ref<string | null>(null);
 const saving = ref(false);
+const configuredBranches = ref<string[]>([]);
+const branchOptions = computed(() => [...new Set([
+  ...configuredBranches.value,
+  ...(branch.value ? [branch.value] : []),
+])].sort());
+
+void fetchCourseCodes()
+  .then((courses) => { configuredBranches.value = courses.map((course) => course.branch); })
+  .catch(() => { configuredBranches.value = []; });
 
 // Pre-fill from session once it loads
 watch(
@@ -89,8 +98,13 @@ async function confirm() {
       </label>
       <label style="font-size:0.9rem">
         Branch
-        <input v-model="branch" placeholder="e.g. CSE"
-               style="display:block;width:100%;margin-top:0.25rem;padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem;box-sizing:border-box" />
+        <select v-if="branchOptions.length" v-model="branch" required
+                style="display:block;width:100%;margin-top:0.25rem">
+          <option value="" disabled>Select branch</option>
+          <option v-for="option in branchOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
+        <input v-else v-model="branch" placeholder="e.g. CSE" required
+               style="display:block;width:100%;margin-top:0.25rem" />
       </label>
 
       <div style="display:flex;gap:1rem;align-items:center;margin-top:0.5rem">

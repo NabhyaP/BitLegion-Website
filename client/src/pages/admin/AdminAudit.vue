@@ -108,8 +108,8 @@ function toggleExpand(id: number) {
             <tr style="border-bottom:1px solid var(--surface);cursor:pointer" @click="toggleExpand(e.id)">
               <td style="padding:0.5rem;color:var(--muted);white-space:nowrap">{{ fmtTime(e.createdAt) }}</td>
               <td style="padding:0.5rem">
-                <span style="font-weight:500">{{ e.actorName ?? '—' }}</span>
-                <span style="font-size:0.7rem;color:var(--muted);margin-left:0.25rem">#{{ e.actorUserId }}</span>
+                <span style="font-weight:500">{{ e.actorName ?? 'System' }}</span>
+                <span v-if="e.actorUserId !== null" style="font-size:0.7rem;color:var(--muted);margin-left:0.25rem">#{{ e.actorUserId }}</span>
               </td>
               <td style="padding:0.5rem;font-family:monospace;color:var(--accent);font-size:0.75rem">{{ e.action }}</td>
               <td style="padding:0.5rem;color:var(--muted);font-size:0.75rem">

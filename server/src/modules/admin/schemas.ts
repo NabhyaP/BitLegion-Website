@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import { env } from '../../config/env.ts';
+import { isCollegeEmail } from '../users/rollno.ts';
+
+const collegeEmailSchema = z.string().email().max(190).refine(
+  (email) => isCollegeEmail(email, env.ALLOWED_EMAIL_SUFFIX),
+  `Email must belong to @${env.ALLOWED_EMAIL_SUFFIX}.`,
+);
 
 export const listMembersQuerySchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100).optional(),
@@ -11,6 +18,7 @@ export const listMembersQuerySchema = z.object({
 
 export const updateMemberSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
+  avatarUrl: z.string().url().max(500).regex(/^https?:\/\//i, 'Avatar URL must use HTTP or HTTPS.').nullable().optional(),
   rollNo: z.string().max(20).nullable().optional(),
   batchYear: z.number().int().min(2000).max(2100).nullable().optional(),
   branch: z.string().max(16).nullable().optional(),
@@ -19,7 +27,7 @@ export const updateMemberSchema = z.object({
 }).strict().refine((d) => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 export const createMemberSchema = z.object({
-  collegeEmail: z.string().email().max(190),
+  collegeEmail: collegeEmailSchema,
   displayName: z.string().min(1).max(100),
   rollNo: z.string().max(20).nullable().optional(),
   batchYear: z.number().int().min(2000).max(2100).nullable().optional(),
@@ -28,7 +36,7 @@ export const createMemberSchema = z.object({
 
 export const csvRowSchema = z.object({
   display_name: z.string().min(1).max(100),
-  college_email: z.string().email().max(190),
+  college_email: collegeEmailSchema,
   batch_year: z.coerce.number().int().min(2000).max(2100),
   branch: z.string().max(16),
 });

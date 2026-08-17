@@ -37,10 +37,10 @@ const originalFetch = globalThis.fetch;
 
 function mockFetch(stub: FetchStub) {
   currentStub = stub;
-  (globalThis as any).fetch = (url: string, init?: RequestInit) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!currentStub) throw new Error('No fetch stub set');
-    return currentStub(url, init);
-  };
+    return currentStub(String(input), init);
+  }) as typeof fetch;
 }
 
 function makeJsonResponse(body: unknown, status = 200): Response {
@@ -53,8 +53,8 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 function okEnvelope<T>(result: T) {
   return makeJsonResponse({ status: 'OK', result });
 }
-function failedEnvelope(comment: string) {
-  return makeJsonResponse({ status: 'FAILED', comment });
+function failedEnvelope(comment: string, status = 200) {
+  return makeJsonResponse({ status: 'FAILED', comment }, status);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,12 +67,12 @@ describe('cf-client — typed errors', () => {
   });
 
   after(() => {
-    (globalThis as any).fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     currentStub = null;
   });
 
   it('returns CfUserInfo array on a 200 OK envelope', async () => {
-    mockFetch(async (_url) =>
+    mockFetch(async () =>
       okEnvelope([{ handle: 'tourist', rating: 3979, maxRating: 3979, rank: 'legendary grandmaster' }]),
     );
     const res = await userInfo(['tourist']);
@@ -113,6 +113,16 @@ describe('cf-client — typed errors', () => {
     });
     await assert.rejects(() => userInfo(['ghost']), CfHandleError);
     assert.equal(calls, 1, 'CfHandleError should not trigger retries');
+  });
+
+  it('throws CfHandleError for an HTTP 400 FAILED envelope from user.info', async () => {
+    let calls = 0;
+    mockFetch(async () => {
+      calls++;
+      return failedEnvelope('handles: User with handle ghost not found', 400);
+    });
+    await assert.rejects(() => userInfo(['tourist', 'ghost']), CfHandleError);
+    assert.equal(calls, 1, 'bad-handle HTTP 400 should not be retried');
   });
 
   it('throws CfUnavailableError on HTTP 503', async () => {
@@ -213,7 +223,7 @@ describe('cf-client — problem key format', () => {
 // ---------------------------------------------------------------------------
 
 describe('leaderboard sort — tie rules', () => {
-  type Entry = { handle: string; rating: number; maxRating: number };
+  type Entry = { handle: string; rating: number; maxRating: number; position?: number };
 
   function sortEntries(entries: Entry[]): Entry[] {
     return [...entries].sort((a, b) => {
@@ -262,10 +272,10 @@ describe('leaderboard sort — tie rules', () => {
       { handle: 'm', rating: 1000, maxRating: 1000 },
     ]);
     entries.forEach((e, i) => {
-      (e as any).position = i + 1;
+      e.position = i + 1;
     });
-    assert.equal((entries[0] as any).position, 1);
-    assert.equal((entries[2] as any).position, 3);
+    assert.equal(entries[0]?.position, 1);
+    assert.equal(entries[2]?.position, 3);
     assert.equal(entries[0].handle, 'a');
   });
 });

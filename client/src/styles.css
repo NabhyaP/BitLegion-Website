@@ -2,7 +2,7 @@
  * Global theme. The pages are plain semantic HTML, so styling the elements
  * here restyles every page without touching them.
  *
- * ponytail: one stylesheet, no framework, no build step. The tokens exist so the
+ * This is one stylesheet with no framework. The tokens exist so the
  * inline styles scattered through the pages have something to point at.
  */
 
@@ -52,7 +52,7 @@ h2,
 h3,
 h4 {
   font-weight: 500;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1.2;
 }
 h1 {
@@ -85,7 +85,7 @@ th {
   text-align: left;
   font-weight: 500;
   font-size: 0.7rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
@@ -102,7 +102,7 @@ tbody tr:hover {
 button {
   font-family: inherit;
   font-size: 0.8rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--text);
   background: transparent;
   border: 1px solid var(--line);

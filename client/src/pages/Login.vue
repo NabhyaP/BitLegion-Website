@@ -7,6 +7,7 @@ const route = useRoute();
 const MESSAGES: Record<string, string> = {
   'not-college-email': 'Use your college Google account (an @iiitp.ac.in address).',
   'account-suspended': 'This account is suspended. Contact a club admin.',
+  'oauth-not-configured': 'Google sign-in is not configured. Contact a club administrator.',
   'oauth-failure': 'Sign-in could not be completed. Please try again.',
 };
 
@@ -14,11 +15,21 @@ const error = computed(() => {
   const code = route.query.error;
   return typeof code === 'string' ? (MESSAGES[code] ?? MESSAGES['oauth-failure']) : null;
 });
+
+const googleHref = computed(() => {
+  const returnTo = route.query.returnTo;
+  const params = new URLSearchParams();
+  if (typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+    params.set('returnTo', returnTo);
+  }
+  const query = params.toString();
+  return `/api/v1/auth/google/start${query ? `?${query}` : ''}`;
+});
 </script>
 
 <template>
   <h2>Sign in</h2>
   <p v-if="error" role="alert" style="border: 1px solid var(--danger); padding: 0.5rem">{{ error }}</p>
   <p>BitLegion is open to IIIT Pune students. Sign in with your college Google account.</p>
-  <a href="/api/v1/auth/google/start">Sign in with Google</a>
+  <a :href="googleHref">Sign in with Google</a>
 </template>

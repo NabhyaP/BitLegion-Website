@@ -83,7 +83,6 @@ const FONT_RATIO = 1.6;
 
 // Fixed aspect so the grid reserves its space before the font metrics settle.
 const boxStyle = computed(() => ({
-  width: `${COLS * cell.value}px`,
   height: `${ROWS * cell.value * ROW_RATIO}px`,
 }));
 
@@ -94,8 +93,10 @@ let running = false;
 function build() {
   const el = root.value;
   if (!el) return;
-  // Fill the width the layout gives us; only a floor, no ceiling.
-  const c = Math.max(8, el.clientWidth / COLS);
+  // Fill the responsive width assigned by the parent layout. Writing an inline
+  // width here would override that constraint and force overflow on mobile.
+  if (el.clientWidth <= 0) return;
+  const c = el.clientWidth / COLS;
   cell.value = c;
 
   const list: Dot[] = [];

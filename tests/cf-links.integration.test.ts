@@ -29,7 +29,8 @@ import { regenerate, sessionMiddleware } from '../server/src/middleware/session.
 import { linkCfHandle, unlinkCfHandle } from '../server/src/modules/codeforces-links/service.ts';
 import * as cfRepo from '../server/src/modules/codeforces-links/repository.ts';
 import { pool } from '../server/src/db/pool.ts';
-import { closeDb, countRows, resetDb, seedCfLink, seedPreProvisioned } from './helpers/db.ts';
+import type { RowDataPacket } from 'mysql2/promise';
+import { closeDb, countRows, resetDb, seedPreProvisioned } from './helpers/db.ts';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -115,7 +116,7 @@ test('linkCfHandle seeds a codeforces_solved_state row with zeroed counters', as
   const userId = await createUser();
   await linkCfHandle(userId, 'tourist', null);
 
-  const [rows] = await pool.query<any[]>(
+  const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT * FROM codeforces_solved_state WHERE user_id = ?`,
     [userId],
   );
@@ -191,7 +192,7 @@ test('unlinkCfHandle sets status to UNLINKED and removes solved_state', async ()
   const account = await cfRepo.findAccountByUserId(userId);
   assert.equal(account!.status, 'UNLINKED');
 
-  const [rows] = await pool.query<any[]>(
+  const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT * FROM codeforces_solved_state WHERE user_id = ?`,
     [userId],
   );

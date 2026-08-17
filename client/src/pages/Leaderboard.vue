@@ -6,12 +6,25 @@
  * ETag / 304 handled by apiFetch automatically (browser cache).
  * §0.3: zero data logic in template — all in script setup.
  */
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { fetchLeaderboard } from '@/api/index.ts';
+import {
+  fetchCourseCodes,
+  fetchLeaderboard,
+  fetchPersonalComparison,
+  fetchRatingTrends,
+} from '@/api/index.ts';
 import { rankInfo } from '@/utils/rankColor.ts';
 import { useSessionStore } from '@/stores/session.ts';
-import type { LeaderboardEntry, LeaderboardMeta } from '@contracts';
+import PersonalComparisonCard from '@/components/PersonalComparisonCard.vue';
+import RatingTrendsChart from '@/components/RatingTrendsChart.vue';
+import type {
+  CourseCodeResponse,
+  LeaderboardEntry,
+  LeaderboardMeta,
+  PersonalComparisonResponse,
+  RatingTrendSeries,
+} from '@contracts';
 
 const route = useRoute();
 const router = useRouter();
@@ -27,6 +40,13 @@ const disabled = ref(false);
 const previewOnly = ref(false);
 const loading = ref(false);
 const error = ref<string | null>(null);
+const courseCodes = ref<CourseCodeResponse[]>([]);
+const trends = ref<RatingTrendSeries[]>([]);
+const trendsLoading = ref(true);
+const trendsError = ref<string | null>(null);
+const trendDays = ref(365);
+const comparison = ref<Extract<PersonalComparisonResponse, { available: true }> | null>(null);
+const comparisonError = ref(false);
 
 // Filters bound to URL
 const sort = ref<'rating' | 'maxRating' | 'solvedCount'>('rating');
@@ -38,13 +58,51 @@ const cursor = ref<string | null>(null);
 // Debounce timer
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let _abortCtrl: AbortController | null = null;
+let _syncingFromRoute = false;
 
 // Batch years: from 2019 to current year + 1
 const currentYear = new Date().getFullYear();
 const batchYears = Array.from({ length: currentYear - 2019 + 2 }, (_, i) => 2019 + i);
 
-// Branches from data (static list for filter; server validates)
-const BRANCHES = ['CSE', 'ECE'];
+const branches = computed(() => [...new Set([
+  ...courseCodes.value.map((course) => course.branch),
+  ...entries.value.flatMap((entry) => entry.branch ? [entry.branch] : []),
+])].sort());
+
+async function loadTrends() {
+  trendsLoading.value = true;
+  trendsError.value = null;
+  try {
+    const result = await fetchRatingTrends(trendDays.value);
+    trends.value = 'disabled' in result ? [] : result.data;
+  } catch (cause) {
+    trendsError.value = cause instanceof Error ? cause.message : 'Failed to load rating trends.';
+  } finally {
+    trendsLoading.value = false;
+  }
+}
+
+async function loadComparison() {
+  comparisonError.value = false;
+  try {
+    const result = await fetchPersonalComparison();
+    comparison.value = result.available ? result : null;
+  } catch {
+    comparison.value = null;
+    comparisonError.value = true;
+  }
+}
+
+onMounted(() => {
+  void loadTrends();
+  void fetchCourseCodes().then((data) => { courseCodes.value = data; });
+});
+
+watch(trendDays, () => { void loadTrends(); });
+watch(() => session.me?.id, (userId) => {
+  if (userId) void loadComparison();
+  else comparison.value = null;
+}, { immediate: true });
 
 // ── Sync URL → local state ─────────────────────────────────────────────────
 function readFromUrl() {
@@ -54,6 +112,10 @@ function readFromUrl() {
   branch.value = String(route.query.branch ?? '');
   q.value = String(route.query.q ?? '');
   cursor.value = (route.query.cursor as string) || null;
+}
+
+function codeforcesProfileUrl(handle: string): string {
+  return `https://codeforces.com/profile/${encodeURIComponent(handle)}`;
 }
 
 function pushUrl() {
@@ -69,7 +131,8 @@ function pushUrl() {
 // ── Fetch ──────────────────────────────────────────────────────────────────
 async function fetchPage() {
   if (_abortCtrl) _abortCtrl.abort();
-  _abortCtrl = new AbortController();
+  const controller = new AbortController();
+  _abortCtrl = controller;
   loading.value = true;
   error.value = null;
   try {
@@ -81,7 +144,7 @@ async function fetchPage() {
       limit: 50,
       cursor: cursor.value || undefined,
     };
-    const res = await fetchLeaderboard(params);
+    const res = await fetchLeaderboard(params, controller.signal);
     if ('disabled' in res && res.disabled) {
       disabled.value = true;
       entries.value = [];
@@ -93,36 +156,41 @@ async function fetchPage() {
       meta.value = (res as { meta: LeaderboardMeta }).meta;
     }
   } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return;
     error.value = e instanceof Error ? e.message : 'Failed to load leaderboard.';
   } finally {
-    loading.value = false;
+    if (_abortCtrl === controller) loading.value = false;
   }
 }
 
 // ── Watchers ───────────────────────────────────────────────────────────────
 watch([sort, batch, branch], () => {
+  if (_syncingFromRoute) return;
   cursor.value = null;  // reset pagination on filter change
   pushUrl();
-  fetchPage();
 });
 
 // Debounce search
 watch(q, () => {
+  if (_syncingFromRoute) return;
   if (_debounceTimer) clearTimeout(_debounceTimer);
   _debounceTimer = setTimeout(() => {
     cursor.value = null;
     pushUrl();
-    fetchPage();
   }, 300);
 });
 
-watch(() => route.query, () => {
+watch(() => route.query, async () => {
+  _syncingFromRoute = true;
   readFromUrl();
-}, { deep: true });
+  await nextTick();
+  _syncingFromRoute = false;
+  await fetchPage();
+}, { deep: true, immediate: true });
 
-onMounted(() => {
-  readFromUrl();
-  fetchPage();
+onBeforeUnmount(() => {
+  _abortCtrl?.abort();
+  if (_debounceTimer) clearTimeout(_debounceTimer);
 });
 
 // ── Pagination ─────────────────────────────────────────────────────────────
@@ -130,14 +198,12 @@ function nextPage() {
   if (!meta.value?.nextCursor) return;
   cursor.value = meta.value.nextCursor;
   pushUrl();
-  fetchPage();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function prevPage() {
   cursor.value = null;
   pushUrl();
-  fetchPage();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -185,6 +251,24 @@ const onCursorPage = computed(() => cursor.value !== null);
     </div>
 
     <template v-else>
+      <PersonalComparisonCard v-if="comparison" :comparison="comparison" />
+      <div v-else-if="comparisonError && session.me" class="supporting-state" role="status">
+        Personal comparison is temporarily unavailable.
+        <button type="button" @click="loadComparison">Retry</button>
+      </div>
+
+      <div v-if="trendsLoading" class="trend-loading" role="status">Loading rating trends...</div>
+      <div v-else-if="trendsError" class="supporting-state" role="alert">
+        Rating trends are temporarily unavailable.
+        <button type="button" @click="loadTrends">Retry</button>
+      </div>
+      <RatingTrendsChart
+        v-else-if="trends.length"
+        v-model:days="trendDays"
+        :series="trends"
+      />
+      <div v-else class="supporting-state">Rating trend history will appear after daily snapshots are collected.</div>
+
       <!-- Controls -->
       <div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem;align-items:flex-end">
         <!-- Search -->
@@ -216,7 +300,7 @@ const onCursorPage = computed(() => cursor.value !== null);
                   style="padding:0.4rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem"
                   aria-label="Filter by branch">
             <option value="">All branches</option>
-            <option v-for="b in BRANCHES" :key="b" :value="b">{{ b }}</option>
+            <option v-for="b in branches" :key="b" :value="b">{{ b }}</option>
           </select>
         </div>
         <!-- Sort -->
@@ -299,10 +383,13 @@ const onCursorPage = computed(() => cursor.value !== null);
                 </RouterLink>
               </td>
               <td style="padding:0.6rem 0.5rem">
-                <RouterLink :to="`/profile/${e.handle}`"
-                            :style="{ color: rankInfo(e.rating).color, fontWeight: 600, textDecoration:'none' }">
+                <a :href="codeforcesProfileUrl(e.handle)"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   :aria-label="`Open ${e.handle} on Codeforces`"
+                   :style="{ color: rankInfo(e.rating).color, fontWeight: 600, textDecoration:'none' }">
                   {{ e.handle }}
-                </RouterLink>
+                </a>
                 <span v-if="e.stale" style="font-size:0.7rem;color:var(--warn);margin-left:0.25rem" title="Stale data">⚠</span>
               </td>
               <td style="padding:0.6rem 0.5rem;color:var(--muted)">{{ e.batch ?? '—' }}</td>
@@ -352,3 +439,23 @@ const onCursorPage = computed(() => cursor.value !== null);
     </template>
   </main>
 </template>
+
+<style scoped>
+.supporting-state,
+.trend-loading {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.25rem;
+  padding: 1rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.supporting-state button {
+  margin-left: 0.5rem;
+}
+
+.trend-loading {
+  min-height: 96px;
+}
+</style>

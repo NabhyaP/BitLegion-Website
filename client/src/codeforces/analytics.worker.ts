@@ -13,11 +13,12 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   if (msg.type !== 'compute') return;
   try {
     const result = computeAnalytics(msg.submissions);
-    const response: WorkerResponse = { type: 'result', result };
+    const response: WorkerResponse = { type: 'result', requestId: msg.requestId, result };
     self.postMessage(response);
   } catch (err) {
     const response: WorkerResponse = {
       type: 'error',
+      requestId: msg.requestId,
       message: err instanceof Error ? err.message : 'Analytics computation failed.',
     };
     self.postMessage(response);

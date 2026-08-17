@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from './config/env.ts';
@@ -20,8 +21,19 @@ import { settingsPublicRouter, settingsAdminRouter } from './modules/settings/ro
 import { teamsPublicRouter, teamsAdminRouter } from './modules/teams/router.ts';
 import { profilesRouter } from './modules/profiles/router.ts';
 import { adminRouter } from './modules/admin/router.ts';
+import { courseCodesAdminRouter, courseCodesPublicRouter } from './modules/course-codes/router.ts';
+import { enforceSameOrigin } from './middleware/requestOrigin.ts';
 
-const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const clientDistCandidates = [
+  path.resolve(process.cwd(), 'client/dist'),
+  path.resolve(process.cwd(), '../client/dist'),
+  path.resolve(moduleDir, '../../client/dist'),
+  path.resolve(moduleDir, '../../../../client/dist'),
+];
+const clientDist = clientDistCandidates.find((candidate) =>
+  existsSync(path.join(candidate, 'index.html'))
+) ?? clientDistCandidates[0]!;
 
 // Process-local buckets (§F). Sufficient for a single Hostinger Node process.
 const authLimiter  = rateLimit({ windowMs: 60_000, limit: 10,  standardHeaders: true });
@@ -63,8 +75,9 @@ export function createApp() {
   );
 
   app.use(compression());
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '2mb' }));
   app.use(sessionMiddleware());
+  app.use(enforceSameOrigin(env.APP_URL));
 
   // ── CSRF protection (§G) — applied after session so req.session is available ──
   app.use(csrfProtection);
@@ -102,11 +115,13 @@ export function createApp() {
   app.use('/api/v1/settings/public',  readLimiter,  settingsPublicRouter);
   app.use('/api/v1/teams',            readLimiter,  teamsPublicRouter);
   app.use('/api/v1/profiles',         readLimiter,  profilesRouter);
+  app.use('/api/v1/course-codes',     readLimiter,  courseCodesPublicRouter);
 
   // Admin surface
   app.use('/api/v1/admin/settings',   adminLimiter, settingsAdminRouter);
   app.use('/api/v1/admin/teams',      adminLimiter, teamsAdminRouter);
   app.use('/api/v1/admin/users',      adminLimiter, adminUsersRouter);
+  app.use('/api/v1/admin/course-codes', adminLimiter, courseCodesAdminRouter);
   app.use('/api/v1/admin',            adminLimiter, adminRouter);
 
   // 404 for unknown /api routes

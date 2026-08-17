@@ -6,20 +6,38 @@
  * All business logic in coordinator / analytics — this template is presentation-only (§0.3).
  * Each widget has its own failure state per §C4.
  */
-import { onMounted, watch, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { onMounted, watch, computed, ref } from 'vue';
 import { useSessionStore } from '@/stores/session.ts';
 import { getHandleRefs, refresh } from '@/codeforces/coordinator.ts';
 import { isStorageUnavailable } from '@/codeforces/cache.ts';
 import { rankInfo } from '@/utils/rankColor.ts';
+import { localDateKey } from '@/utils/date.ts';
+import { fetchUpcomingContests } from '@/codeforces/client.ts';
+import AccountMenu from '@/components/AccountMenu.vue';
+import type { CfContest } from '@/codeforces/types.ts';
 
 const session = useSessionStore();
-const route = useRoute();
-
 const cfHandle = computed(() => session.cfHandle);
 const cfRefs = computed(() => (cfHandle.value ? getHandleRefs(cfHandle.value) : null));
 
+const upcomingContests = ref<CfContest[]>([]);
+const contestsLoading = ref(true);
+const contestsError = ref<string | null>(null);
+
+async function loadUpcomingContests() {
+  contestsLoading.value = true;
+  contestsError.value = null;
+  try {
+    upcomingContests.value = await fetchUpcomingContests();
+  } catch (error) {
+    contestsError.value = error instanceof Error ? error.message : 'Could not load upcoming contests.';
+  } finally {
+    contestsLoading.value = false;
+  }
+}
+
 onMounted(async () => {
+  void loadUpcomingContests();
   // Always force-reload on dashboard — session may be stale (e.g. just linked CF).
   await session.load(true);
   if (session.cfHandle) refresh(session.cfHandle);
@@ -79,8 +97,8 @@ const DONUT_CX = 90;
 const DONUT_CY = 90;
 
 const DONUT_COLORS = [
-  'var(--accent)','var(--accent)','var(--ok)','var(--warn)','var(--danger)',
-  'var(--accent)','var(--accent)','var(--ok)','var(--warn)','var(--danger)','var(--muted)',
+  '#60a5fa', '#4ade80', '#fbbf24', '#fb7185', '#22d3ee',
+  '#c084fc', '#f97316', '#a3e635', '#e879f9', '#38bdf8', '#8a8a8a',
 ];
 
 const donutArcs = computed(() => {
@@ -132,7 +150,7 @@ const calendarCells = computed(() => {
       const dt = new Date(startDay);
       dt.setDate(startDay.getDate() + w * 7 + d);
       if (dt > today) { cells.push({ date: '', count: -1, wi: w, di: d }); continue; }
-      const key = dt.toISOString().slice(0, 10);
+      const key = localDateKey(dt);
       cells.push({ date: key, count: map.get(key) ?? 0, wi: w, di: d });
     }
   }
@@ -141,10 +159,34 @@ const calendarCells = computed(() => {
 
 function calColor(count: number): string {
   if (count <= 0) return 'var(--line)';
-  if (count <= 2) return 'var(--ok-bg)';
-  if (count <= 5) return 'var(--ok)';
-  if (count <= 10) return 'var(--ok)';
-  return 'var(--ok)';
+  if (count <= 2) return 'rgba(74, 222, 128, 0.25)';
+  if (count <= 5) return 'rgba(74, 222, 128, 0.5)';
+  if (count <= 10) return 'rgba(74, 222, 128, 0.75)';
+  return 'rgb(74, 222, 128)';
+}
+
+const CALENDAR_LEGEND = [
+  'var(--line)',
+  'rgba(74, 222, 128, 0.25)',
+  'rgba(74, 222, 128, 0.5)',
+  'rgba(74, 222, 128, 0.75)',
+  'rgb(74, 222, 128)',
+];
+
+function formatContestStart(startsAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(startsAt);
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 // ── Freshness label ───────────────────────────────────────────────────────
@@ -162,7 +204,7 @@ const isRefreshing = computed(() =>
 );
 
 function doRefresh() {
-  if (session.cfHandle) refresh(session.cfHandle);
+  if (session.cfHandle) refresh(session.cfHandle, { force: true });
 }
 </script>
 
@@ -171,13 +213,8 @@ function doRefresh() {
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:0.5rem">
       <h1 style="margin:0">Dashboard</h1>
       <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
-        <span v-if="session.me" style="font-size:0.9rem;color:var(--muted)">{{ session.me.displayName }}</span>
         <RouterLink to="/leaderboard">Leaderboard</RouterLink>
-        <RouterLink to="/settings">Settings</RouterLink>
-        <RouterLink v-if="session.isAdmin" to="/admin"
-                    style="background:var(--text);color:var(--surface);padding:0.25rem 0.75rem;border-radius:4px;text-decoration:none;font-size:0.85rem">
-          Admin ⚙
-        </RouterLink>
+        <AccountMenu />
       </div>
     </header>
 
@@ -186,6 +223,35 @@ function doRefresh() {
          style="background:var(--warn-bg);border:1px solid var(--warn);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
       <strong>Notice:</strong> IndexedDB is not available. Codeforces data will be lost on page reload.
     </div>
+
+    <section class="contest-section" aria-labelledby="upcoming-contests-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="upcoming-contests-title">Upcoming Codeforces Contests</h2>
+          <p>Times are shown in your local timezone.</p>
+        </div>
+        <button v-if="contestsError" type="button" @click="loadUpcomingContests">Retry</button>
+      </div>
+      <div v-if="contestsLoading" class="contest-state" role="status">Loading contests...</div>
+      <div v-else-if="contestsError" class="contest-state contest-error" role="alert">
+        Codeforces contests are temporarily unavailable.
+      </div>
+      <div v-else-if="upcomingContests.length === 0" class="contest-state">No upcoming contests announced.</div>
+      <div v-else class="contest-list">
+        <a
+          v-for="contest in upcomingContests"
+          :key="contest.id"
+          class="contest-item"
+          :href="`https://codeforces.com/contest/${contest.id}`"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span class="contest-date">{{ formatContestStart(contest.startsAt) }}</span>
+          <strong>{{ contest.name }}</strong>
+          <span class="contest-duration">{{ formatDuration(contest.durationSeconds) }}</span>
+        </a>
+      </div>
+    </section>
 
     <!-- No CF link -->
     <section v-if="!session.hasCfLink && !session.loading"
@@ -218,6 +284,11 @@ function doRefresh() {
       <div v-if="cfRefs.status.value === 'cf-unavailable'" role="alert" aria-live="polite"
            style="background:var(--warn-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
         <strong>Codeforces is currently unavailable.</strong> Showing cached data.
+      </div>
+
+      <div v-if="cfRefs.status.value === 'partial'" role="status" aria-live="polite"
+           style="background:var(--warn-bg);border-radius:4px;padding:0.75rem;margin-bottom:1rem">
+        Some Codeforces details could not be refreshed. Available cached data is shown below.
       </div>
 
       <!-- Error: first visit, no cache -->
@@ -437,7 +508,7 @@ function doRefresh() {
             <!-- Calendar legend -->
             <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;font-size:0.75rem;color:var(--muted)">
               <span>Less</span>
-              <span v-for="c in ['var(--line)','var(--ok-bg)','var(--ok)','var(--ok)','var(--ok)']" :key="c"
+              <span v-for="(c, i) in CALENDAR_LEGEND" :key="i"
                     :style="{ width:'12px', height:'12px', background:c, borderRadius:'2px', display:'inline-block' }" aria-hidden="true"></span>
               <span>More</span>
             </div>
@@ -464,3 +535,76 @@ function doRefresh() {
     </template>
   </main>
 </template>
+
+<style scoped>
+.contest-section {
+  margin-bottom: 1.5rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 1rem 0;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.section-heading p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.section-heading button {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+}
+
+.contest-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 0.6rem;
+}
+
+.contest-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 0.7rem 0.8rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.contest-item strong {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.contest-date,
+.contest-duration,
+.contest-state {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.contest-duration {
+  text-align: right;
+}
+
+.contest-error {
+  color: var(--danger);
+}
+</style>

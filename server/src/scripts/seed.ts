@@ -52,7 +52,9 @@ async function main() {
     );
     if (Number((ccRows as import('mysql2/promise').RowDataPacket[])[0]!.cnt) === 0) {
       await conn.query(
-        "INSERT INTO course_codes (code, branch) VALUES ('15', 'CSE'), ('16', 'ECE')",
+        `INSERT INTO course_codes (code, branch, name) VALUES
+          ('15', 'CSE', 'Computer Science and Engineering'),
+          ('16', 'ECE', 'Electronics and Communication Engineering')`,
       );
       console.log('✓ Course codes: seeded 15=CSE, 16=ECE');
     } else {

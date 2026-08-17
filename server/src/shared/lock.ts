@@ -4,6 +4,7 @@
  * is not confused with pooled connections that may be reused by other queries.
  */
 import { pool } from '../db/pool.ts';
+import type { RowDataPacket } from 'mysql2/promise';
 
 /**
  * Acquire a named MySQL lock, run `fn`, then release.
@@ -17,7 +18,7 @@ import { pool } from '../db/pool.ts';
 export async function withLock<T>(lockName: string, fn: () => Promise<T>): Promise<T | null> {
   const conn = await pool.getConnection();
   try {
-    const [[row]] = await conn.query<any[]>(
+    const [[row]] = await conn.query<RowDataPacket[]>(
       'SELECT GET_LOCK(?, 0) AS acquired',
       [lockName],
     );

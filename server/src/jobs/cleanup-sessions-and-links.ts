@@ -7,6 +7,7 @@
  */
 
 import { pool } from '../db/pool.ts';
+import type { ResultSetHeader } from 'mysql2/promise';
 
 async function run(): Promise<void> {
   const startedAt = new Date();
@@ -15,16 +16,21 @@ async function run(): Promise<void> {
   try {
     // Expired sessions (express-mysql-session stores expiry in the `expires` column).
     // If the session store's own reaper is active this is a no-op.
-    const [sessResult] = await pool.query<any>(
-      `DELETE FROM sessions WHERE expires < UNIX_TIMESTAMP() * 1000`,
-    ).catch(() => [{ affectedRows: 0 }]); // sessions table may not exist in test env
-    const deletedSessions = (sessResult as any).affectedRows ?? 0;
+    let deletedSessions = 0;
+    try {
+      const [sessResult] = await pool.query<ResultSetHeader>(
+        `DELETE FROM sessions WHERE expires < UNIX_TIMESTAMP() * 1000`,
+      );
+      deletedSessions = sessResult.affectedRows;
+    } catch {
+      // The session table may not exist in a fresh test database.
+    }
 
     // Belt-and-suspenders: any remaining expired link attempts.
-    const [linkResult] = await pool.query<any>(
+    const [linkResult] = await pool.query<ResultSetHeader>(
       `DELETE FROM codeforces_link_attempts WHERE expires_at < NOW()`,
     );
-    const deletedLinks = (linkResult as any).affectedRows ?? 0;
+    const deletedLinks = linkResult.affectedRows;
 
     const durationMs = Date.now() - startedAt.getTime();
     await pool.query(

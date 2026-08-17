@@ -10,7 +10,7 @@ import { pool } from '../../db/pool.ts';
 import * as repo from './repository.ts';
 import * as usersRepo from '../users/repository.ts';
 import * as audit from '../audit/repository.ts';
-import { forbidden, badRequest, conflict, notFound } from '../../shared/errors.ts';
+import { forbidden, conflict, notFound } from '../../shared/errors.ts';
 import type { RoleCode, UserStatus } from '../users/types.ts';
 import type { ListMembersOptions } from './repository.ts';
 
@@ -26,6 +26,7 @@ export async function adminUpdateMember(
   targetUserId: number,
   patch: {
     displayName?: string;
+    avatarUrl?: string | null;
     rollNo?: string | null;
     batchYear?: number | null;
     branch?: string | null;
@@ -134,16 +135,20 @@ export type CsvImportResult = {
   errors: Array<{ row: number; email: string; reason: string }>;
 };
 
+export type ValidatedCsvRow = {
+  row: number;
+  data: { display_name: string; college_email: string; batch_year: number; branch: string };
+};
+
 export async function importMembersFromCsv(
-  rows: Array<{ display_name: string; college_email: string; batch_year: number; branch: string }>,
+  rows: ValidatedCsvRow[],
   actorId: number,
   requestId?: string,
 ): Promise<CsvImportResult> {
   const result: CsvImportResult = { imported: 0, skipped: 0, errors: [] };
 
-  let rowNum = 1;
-  for (const r of rows) {
-    rowNum++;
+  for (const item of rows) {
+    const r = item.data;
     try {
       const existing = await usersRepo.findByEmail(r.college_email.toLowerCase());
       if (existing) {
@@ -178,7 +183,7 @@ export async function importMembersFromCsv(
       }
     } catch (e) {
       result.errors.push({
-        row: rowNum,
+        row: item.row,
         email: r.college_email,
         reason: e instanceof Error ? e.message : 'Unknown error.',
       });
