@@ -1,3 +1,4 @@
+import './styles.css';
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';

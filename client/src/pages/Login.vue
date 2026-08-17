@@ -18,7 +18,7 @@ const error = computed(() => {
 
 <template>
   <h2>Sign in</h2>
-  <p v-if="error" role="alert" style="border: 1px solid #b00; padding: 0.5rem">{{ error }}</p>
+  <p v-if="error" role="alert" style="border: 1px solid var(--danger); padding: 0.5rem">{{ error }}</p>
   <p>BitLegion is open to IIIT Pune students. Sign in with your college Google account.</p>
   <a href="/api/v1/auth/google/start">Sign in with Google</a>
 </template>
