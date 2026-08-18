@@ -106,24 +106,6 @@ async function handleLogout() {
       <div style="font-size:0.9rem;margin-bottom:0.75rem">
         <strong>Display name:</strong>
         <span style="margin-left:0.4rem">{{ session.me?.displayName }}</span>
-        <button v-if="!editing"
-                style="margin-left:0.75rem;font-size:0.8rem;cursor:pointer;padding:0.2rem 0.6rem;border:1px solid var(--line);border-radius:4px"
-                @click="startEdit">Edit</button>
-        <form v-if="editing" @submit.prevent="saveDisplayName"
-              style="margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap">
-          <input v-model="displayNameDraft" maxlength="100" required
-                 :disabled="saving"
-                 style="padding:0.35rem 0.6rem;border:1px solid var(--line);border-radius:4px;font-size:0.9rem;flex:1;min-width:160px" />
-          <button type="submit" :disabled="saving"
-                  style="padding:0.35rem 0.8rem;background:var(--accent);color:var(--surface);border:none;border-radius:4px;cursor:pointer">
-            {{ saving ? 'Saving…' : 'Save' }}
-          </button>
-          <button type="button" :disabled="saving"
-                  style="padding:0.35rem 0.8rem;border:1px solid var(--line);border-radius:4px;cursor:pointer"
-                  @click="editing=false">Cancel</button>
-        </form>
-        <div v-if="saveError" role="alert" style="color:var(--danger);font-size:0.8rem;margin-top:0.25rem">{{ saveError }}</div>
-        <div v-if="saveSuccess" role="status" style="color:var(--ok);font-size:0.8rem;margin-top:0.25rem">Saved.</div>
       </div>
 
       <div style="font-size:0.9rem;color:var(--muted)">

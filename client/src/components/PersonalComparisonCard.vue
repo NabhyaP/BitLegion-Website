@@ -37,7 +37,6 @@ function ordinal(value: number): string {
           <div><dt>Percentile</dt><dd>{{ ordinal(comparison.overall.percentile) }}</dd></div>
           <div><dt>Average</dt><dd>{{ comparison.overall.average }}</dd></div>
           <div><dt>Median</dt><dd>{{ comparison.overall.median }}</dd></div>
-          <div><dt>vs average</dt><dd :class="{ positive: comparison.overall.differenceFromAverage > 0, negative: comparison.overall.differenceFromAverage < 0 }">{{ delta(comparison.overall.differenceFromAverage) }}</dd></div>
         </dl>
       </div>
 
@@ -48,7 +47,6 @@ function ordinal(value: number): string {
           <div><dt>Percentile</dt><dd>{{ ordinal(comparison.cohort.percentile) }}</dd></div>
           <div><dt>Average</dt><dd>{{ comparison.cohort.average }}</dd></div>
           <div><dt>Median</dt><dd>{{ comparison.cohort.median }}</dd></div>
-          <div><dt>vs average</dt><dd :class="{ positive: comparison.cohort.differenceFromAverage > 0, negative: comparison.cohort.differenceFromAverage < 0 }">{{ delta(comparison.cohort.differenceFromAverage) }}</dd></div>
         </dl>
       </div>
     </div>
